@@ -21,6 +21,7 @@ export default function Admin() {
   const [newInv, setNewInv] = useState(false);
   const [editInv, setEditInv] = useState(null);
   const [newMv, setNewMv] = useState(false);
+  const [editMv, setEditMv] = useState(null);
 
   const load = useCallback(async () => {
     setProfiles(await api.profiles());
@@ -57,7 +58,7 @@ export default function Admin() {
       <main className="wrap">
         <section className="hero">
           <div className="eyebrow">Tableau de bord · admin</div>
-          <h1>Salut Morgan.</h1>
+          <h1>Salut {(me.full_name || 'Morgz').split(' ')[0]}.</h1>
           <p className="sub">{investors.length} partenaire{investors.length > 1 ? 's' : ''} · {active.length} pièce{active.length > 1 ? 's' : ''} en cours · {sold.length} vendue{sold.length > 1 ? 's' : ''}</p>
         </section>
 
@@ -103,13 +104,13 @@ export default function Admin() {
               const s = investorSummary(pieces.filter((p) => p.investor_id === i.id), mvts.filter((m) => m.investor_id === i.id), i.share_pct);
               return (
                 <tr key={i.id}>
-                  <td><b>{i.full_name || '—'}</b><div className="m" style={{ color: 'var(--muted)' }}>{i.email}</div></td>
+                  <td style={{ cursor: 'pointer' }} onClick={() => setEditInv(i)}><b>{i.full_name || '—'}</b><div className="m" style={{ color: 'var(--muted)' }}>{i.email}</div></td>
                   <td>{i.share_pct} %</td>
                   <td className="r">{eur(s.capital)}</td>
                   <td className="r">{eur(s.engage)}</td>
                   <td className="r pos">{eur(s.gainsRealises, true)}</td>
                   <td className="r"><b>{eur(s.valeur)}</b></td>
-                  <td className="r"><button className="btn ghost sm" onClick={() => setEditInv(i)}>Modifier</button></td>
+                  <td className="r"><button className="btn ghost sm" onClick={() => setEditInv(i)}>Gérer</button></td>
                 </tr>
               );
             })}</tbody>
@@ -126,7 +127,7 @@ export default function Admin() {
                 <td><b>{MV[m.type]}</b></td>
                 <td className="m" style={{ color: 'var(--muted)' }}>{m.note}</td>
                 <td className="r"><b>{m.type === 'apport' ? '+' : '−'}{eur(m.amount)}</b></td>
-                <td className="r"><button className="btn danger sm" onClick={async () => { if (confirm('Supprimer ce mouvement ?')) { await api.deleteMovement(m.id); load(); } }}>Suppr.</button></td>
+                <td className="r" style={{ whiteSpace: 'nowrap' }}><button className="btn ghost sm" onClick={() => setEditMv(m)}>Modifier</button> <button className="btn danger sm" onClick={async () => { if (confirm('Supprimer ce mouvement ?')) { await api.deleteMovement(m.id); load(); } }}>Suppr.</button></td>
               </tr>
             ))}</tbody>
           </table></div>
@@ -143,7 +144,11 @@ export default function Admin() {
       )}
       {edit && <PieceForm initial={edit} investors={investors} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(); }} />}
       {newInv && <InvestorForm onClose={() => setNewInv(false)} onSaved={() => { setNewInv(false); load(); }} />}
-      {editInv && <InvestorForm initial={editInv} onClose={() => setEditInv(null)} onSaved={() => { setEditInv(null); load(); }} />}
+      {editInv && byId[editInv.id] && (
+        <PartnerEditor inv={byId[editInv.id]} pieces={pieces.filter((p) => p.investor_id === editInv.id)} mvts={mvts.filter((m) => m.investor_id === editInv.id)}
+          onClose={() => setEditInv(null)} reload={load} onDeleted={() => { setEditInv(null); load(); }} />
+      )}
+      {editMv && <MovementForm investors={investors} initial={editMv} onClose={() => setEditMv(null)} onSaved={() => { setEditMv(null); load(); }} />}
       {newMv && <MovementForm investors={investors} onClose={() => setNewMv(false)} onSaved={() => { setNewMv(false); load(); }} />}
     </>
   );
@@ -284,16 +289,21 @@ function InvestorForm({ initial, onClose, onSaved }) {
   );
 }
 
-function MovementForm({ investors, onClose, onSaved }) {
-  const [m, setM] = useState({ investor_id: investors[0]?.id, type: 'apport', amount: '', date: today(), note: '' });
+function MovementForm({ investors, initial, fixedInvestor, onClose, onSaved }) {
+  const editing = !!initial?.id;
+  const [m, setM] = useState({ investor_id: fixedInvestor || investors[0]?.id, type: 'apport', amount: '', date: today(), note: '', ...initial });
   const { busy, err, run } = useBusy();
   const set = (k) => (e) => setM({ ...m, [k]: e.target.value });
   return (
     <Modal onClose={onClose}>
-      <h2>Nouveau mouvement</h2>
-      <form onSubmit={(e) => { e.preventDefault(); run(async () => { await api.saveMovement({ ...m, amount: Number(m.amount) }); onSaved(); }); }}>
+      <h2>{editing ? 'Modifier le mouvement' : 'Nouveau mouvement'}</h2>
+      <form onSubmit={(e) => { e.preventDefault(); run(async () => {
+        const row = { investor_id: m.investor_id, type: m.type, amount: Number(m.amount), date: m.date, note: m.note || '' };
+        if (editing) await api.updateMovement({ id: m.id, ...row }); else await api.saveMovement(row);
+        onSaved();
+      }); }}>
         <div className="fgrid">
-          <Field label="Partenaire"><select value={m.investor_id} onChange={set('investor_id')}>{investors.map((i) => <option key={i.id} value={i.id}>{i.full_name || i.email}</option>)}</select></Field>
+          <Field label="Partenaire"><select value={m.investor_id} onChange={set('investor_id')} disabled={!!fixedInvestor}>{investors.map((i) => <option key={i.id} value={i.id}>{i.full_name || i.email}</option>)}</select></Field>
           <Field label="Type"><select value={m.type} onChange={set('type')}>{Object.entries(MV).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
           <Field label="Montant (€)"><input className="in-f" type="number" step="0.01" min="0" required value={m.amount} onChange={set('amount')} /></Field>
           <Field label="Date"><input className="in-f" type="date" required value={m.date} onChange={set('date')} /></Field>
@@ -302,6 +312,96 @@ function MovementForm({ investors, onClose, onSaved }) {
         <button className="btn" style={{ marginTop: 18 }} disabled={busy}>Enregistrer</button>
         {err && <div className="err">{err}</div>}
       </form>
+    </Modal>
+  );
+}
+
+function PartnerEditor({ inv, pieces, mvts, onClose, reload, onDeleted }) {
+  const [f, setF] = useState({ full_name: inv.full_name || '', email: inv.email || '', share_pct: inv.share_pct ?? 60, password: '' });
+  const [saved, setSaved] = useState(false);
+  const [mv, setMv] = useState(null);
+  const [del, setDel] = useState(false);
+  const [confirmName, setConfirmName] = useState('');
+  const { busy, err, run } = useBusy();
+  const set = (k) => (e) => { setSaved(false); setF({ ...f, [k]: e.target.value }); };
+  const s = investorSummary(pieces, mvts, f.share_pct);
+  const active = pieces.filter((p) => p.status === 'achetee' || p.status === 'en_vente').length;
+
+  if (mv) return <MovementForm investors={[inv]} fixedInvestor={inv.id} initial={mv} onClose={() => setMv(null)} onSaved={async () => { setMv(null); await reload(); }} />;
+
+  return (
+    <Modal onClose={onClose}>
+      <h2>{inv.full_name || inv.email}</h2>
+      <div className="m" style={{ color: 'var(--muted)', marginTop: -8 }}>{inv.email}</div>
+
+      <div className="kv">
+        <div><div className="k">Capital investi</div><div className="v">{eur(s.capital)}</div></div>
+        <div><div className="k">Engagé en pièces</div><div className="v">{eur(s.engage)}</div></div>
+        <div><div className="k">Disponible</div><div className="v">{eur(s.disponible)}</div></div>
+        <div><div className="k">Gains réalisés</div><div className="v pos">{eur(s.gainsRealises, true)}</div></div>
+        <div><div className="k">Gains versés</div><div className="v">{eur(s.verses)}</div></div>
+        <div><div className="k">Valeur actuelle</div><div className="v">{eur(s.valeur)}</div></div>
+      </div>
+
+      <h3 style={{ margin: '22px 0 10px', fontSize: 17 }}>Informations</h3>
+      <form onSubmit={(e) => { e.preventDefault(); run(async () => {
+        const body = { id: inv.id, full_name: f.full_name, share_pct: Number(f.share_pct) };
+        if (f.email.trim() && f.email.trim() !== inv.email) body.email = f.email.trim();
+        if (f.password) body.password = f.password;
+        await api.updateInvestor(body); await reload(); setF({ ...f, password: '' }); setSaved(true);
+      }); }}>
+        <div className="fgrid">
+          <Field label="Nom et prénom"><input className="in-f" required value={f.full_name} onChange={set('full_name')} /></Field>
+          <Field label="Part de la marge (%)"><input className="in-f" type="number" min="0" max="100" value={f.share_pct} onChange={set('share_pct')} /></Field>
+          <Field label="Email de connexion"><input className="in-f" type="email" required value={f.email} onChange={set('email')} /></Field>
+          {!DEMO ? <Field label="Nouveau mot de passe (optionnel)"><input className="in-f" minLength={8} value={f.password} onChange={set('password')} placeholder="Laisser vide pour ne pas changer" /></Field> : <div />}
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 14 }}>
+          <button className="btn" disabled={busy}>{busy ? '…' : 'Enregistrer'}</button>
+          {saved && <span className="pos" style={{ fontWeight: 600 }}>Enregistré ✓</span>}
+        </div>
+      </form>
+
+      <div className="row" style={{ margin: '28px 0 10px' }}>
+        <h3 style={{ margin: 0, fontSize: 17 }}>Argent investi et versements</h3>
+        <button className="btn ghost sm" onClick={() => setMv({ type: 'apport' })}>+ Ajouter</button>
+      </div>
+      {mvts.length === 0 ? <div className="empty" style={{ padding: 24 }}>Aucun mouvement.</div> : (
+        <div className="scroll"><table className="tbl" style={{ boxShadow: 'none', border: '1px solid var(--line)' }}>
+          <thead><tr><th>Date</th><th>Type</th><th className="r">Montant</th><th></th></tr></thead>
+          <tbody>{mvts.map((m) => (
+            <tr key={m.id}>
+              <td>{new Date(m.date).toLocaleDateString('fr-FR')}{m.note ? <div className="m" style={{ color: 'var(--muted)', fontSize: 12 }}>{m.note}</div> : null}</td>
+              <td><b>{MV[m.type]}</b></td>
+              <td className="r"><b>{m.type === 'apport' ? '+' : '−'}{eur(m.amount)}</b></td>
+              <td className="r" style={{ whiteSpace: 'nowrap' }}>
+                <button className="btn ghost sm" onClick={() => setMv(m)}>Modifier</button>{' '}
+                <button className="btn danger sm" onClick={() => run(async () => { await api.deleteMovement(m.id); await reload(); })}>×</button>
+              </td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+      )}
+
+      <div style={{ marginTop: 30, padding: 18, borderRadius: 18, border: '1px solid #f3d3c4', background: '#fff8f5' }}>
+        <b style={{ color: 'var(--warn)' }}>Supprimer ce partenaire</b>
+        <p className="m" style={{ color: 'var(--ink-2)', fontSize: 13.5, margin: '6px 0 12px' }}>
+          Son compte et tout son historique d'argent seront supprimés définitivement.
+          {pieces.length > 0 && ` Ses ${pieces.length} pièce${pieces.length > 1 ? 's' : ''} resteront dans ta liste, en « Non attribuée ».`}
+          {active > 0 && ` Attention : ${active} pièce${active > 1 ? 's sont' : ' est'} encore en cours.`}
+        </p>
+        {!del ? <button className="btn danger sm" onClick={() => setDel(true)}>Supprimer…</button> : (
+          <div>
+            <label>Pour confirmer, tape son nom : <b>{inv.full_name || inv.email}</b></label>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <input className="in-f" value={confirmName} onChange={(e) => setConfirmName(e.target.value)} />
+              <button className="btn" style={{ background: 'var(--warn)' }} disabled={busy || confirmName.trim() !== (inv.full_name || inv.email).trim()}
+                onClick={() => run(async () => { await api.deleteInvestor(inv.id); onDeleted(); })}>Supprimer définitivement</button>
+            </div>
+          </div>
+        )}
+      </div>
+      {err && <div className="err">{err}</div>}
     </Modal>
   );
 }

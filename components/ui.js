@@ -4,8 +4,13 @@ import { useRouter } from 'next/navigation';
 import { api, DEMO } from '@/lib/data';
 import { STATUS, eur, pieceNumbers, timing } from '@/lib/calc';
 
+export function isCapture() {
+  if (typeof window === 'undefined') return false;
+  try { if (location.search.includes('capture')) sessionStorage.setItem('cap', '1'); return sessionStorage.getItem('cap') === '1'; } catch { return false; }
+}
+
 export function DemoBanner() {
-  if (!DEMO) return null;
+  if (!DEMO || isCapture()) return null;
   return (
     <div className="demo-banner">
       Mode démo — données fictives stockées dans ce navigateur.{' '}

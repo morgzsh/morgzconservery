@@ -1,14 +1,16 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, DEMO } from '@/lib/data';
-import { DemoBanner, useBusy } from '@/components/ui';
+import { DemoBanner, useBusy, isCapture } from '@/components/ui';
 
 export default function Login() {
   const r = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const { busy, err, run } = useBusy();
+  const [cap, setCap] = useState(false);
+  useEffect(() => setCap(isCapture()), []);
 
   const go = (e, p) => run(async () => {
     await api.signIn(e, p);
@@ -26,11 +28,11 @@ export default function Login() {
           <p className="sub" style={{ marginBottom: 28 }}>Suis tes pièces, tes ventes et ta part en temps réel.</p>
           <form onSubmit={(e) => { e.preventDefault(); go(email, password); }} style={{ textAlign: 'left', display: 'grid', gap: 14 }}>
             <div><label>Email</label><input className="in-f" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" /></div>
-            {!DEMO && <div><label>Mot de passe</label><input className="in-f" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" /></div>}
+            {(!DEMO || cap) && <div><label>Mot de passe</label><input className="in-f" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" /></div>}
             <button className="btn" disabled={busy} style={{ height: 48, marginTop: 4 }}>{busy ? 'Connexion…' : 'Se connecter'}</button>
           </form>
           {err && <div className="err">{err}</div>}
-          {DEMO && (
+          {DEMO && !cap && (
             <div style={{ marginTop: 26 }}>
               <div className="eyebrow" style={{ marginBottom: 10 }}>Essayer la démo</div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>

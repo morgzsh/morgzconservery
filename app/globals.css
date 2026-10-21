@@ -144,3 +144,8 @@ textarea { height: 84px; padding: 10px 14px; resize: vertical; }
   .pill { height: 22px; padding: 0 9px; font-size: 9.5px; }
   .wrap { padding: 0 16px 60px; }
 }
+@media (max-width: 600px) {
+  .tabs button { padding: 0 12px; font-size: 13.5px; }
+  .tbl th, .tbl td { padding: 12px 10px; }
+}
+@media (max-width: 600px) { .top .badge { display: none; } .top .btn.sm { padding: 0 12px; } }

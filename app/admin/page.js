@@ -17,6 +17,7 @@ export default function Admin() {
   const [pieces, setPieces] = useState([]);
   const [mvts, setMvts] = useState([]);
   const [filter, setFilter] = useState('all');
+  const [ownerF, setOwnerF] = useState('all');
   const [view, setView] = useState(null);
   const [edit, setEdit] = useState(null);
   const [newInv, setNewInv] = useState(false);
@@ -64,7 +65,8 @@ export default function Admin() {
   const acc = morgzSummary(pieces, exps, shareOf);
   const pieceName = (id) => { const p = pieces.find((x) => x.id === id); return p ? (p.brand ? p.brand + ' — ' : '') + p.title : 'Pièce supprimée'; };
   const exOf = (id) => exps.filter((e) => e.investor_id === id);
-  const shown = pieces.filter((p) => filter === 'all' || p.status === filter);
+  const shown = pieces.filter((p) => (filter === 'all' || p.status === filter)
+    && (ownerF === 'all' || (ownerF === 'morgz' ? !p.investor_id : p.investor_id === ownerF)));
 
   return (
     <>
@@ -72,14 +74,14 @@ export default function Admin() {
       <main className="wrap">
         <section className="hero">
           <div className="eyebrow">Tableau de bord · admin</div>
-          <h1>Salut {(me.full_name || 'Morgz').split(' ')[0]}.</h1>
+          <h1>Salut Morgz.</h1>
           <p className="sub">{investors.length} partenaire{investors.length > 1 ? 's' : ''} · {active.length} pièce{active.length > 1 ? 's' : ''} en cours · {sold.length} vendue{sold.length > 1 ? 's' : ''}</p>
         </section>
 
         <div className="stats">
           <Stat dark k="Capital partenaires" v={eur(capital)} h={`${eur(capital - engage - generalAll)} disponibles`} />
           <Stat k="Engagé en pièces" v={eur(engage)} h={`${active.length} en cours`} />
-          <Stat k="Ta marge réalisée" v={eur(morgzNet, true)} h="Part morgz sur pièces vendues, après frais" />
+          <Stat k="Ta marge réalisée" v={eur(morgzNet, true)} h="Part Morgz sur pièces vendues, après frais" />
           <Stat k="Dû aux partenaires" v={eur(invReal, true)} h="Gains réalisés, avant versements" />
         </div>
 
@@ -100,14 +102,19 @@ export default function Admin() {
 
         {tab === 'pieces' && (
           <>
-            <div className="chips" style={{ marginBottom: 16 }}>
+            <div className="chips" style={{ marginBottom: 16, alignItems: 'center' }}>
+              <select value={ownerF} onChange={(e) => setOwnerF(e.target.value)} style={{ width: 'auto', height: 34, padding: '0 12px', borderRadius: 999, fontWeight: 600, fontSize: 13 }}>
+                <option value="all">Pour : tout le monde</option>
+                <option value="morgz">Pour : Morgz (moi)</option>
+                {investors.map((i) => <option key={i.id} value={i.id}>Pour : {i.full_name || i.email}</option>)}
+              </select>
               {[['all', 'Toutes'], ...Object.entries(STATUS).map(([k, v]) => [k, v.label])].map(([k, l]) => (
                 <button key={k} className={'btn sm ' + (filter === k ? '' : 'ghost')} onClick={() => setFilter(k)}>{l}</button>
               ))}
             </div>
             {shown.length === 0 ? <div className="empty">Aucune pièce. Ajoute ta première pièce.</div> : (
               <div className="grid">{shown.map((p) => (
-                <PieceCard key={p.id} p={p} share={shareOf(p.investor_id)} owner={byId[p.investor_id]?.full_name || 'Non attribuée'} onClick={() => setView(p)} />
+                <PieceCard key={p.id} p={p} share={shareP(p)} mine={!p.investor_id} owner={p.investor_id ? 'Pour ' + (byId[p.investor_id]?.full_name || 'partenaire') : 'Pour Morgz'} onClick={() => setView(p)} />
               ))}</div>
             )}
           </>
@@ -160,7 +167,7 @@ export default function Admin() {
       </main>
 
       {view && (
-        <PieceDetail p={view} share={shareOf(view.investor_id)} onClose={() => setView(null)} actions={<>
+        <PieceDetail p={view} share={shareP(view)} mine={!view.investor_id} owner={view.investor_id ? byId[view.investor_id]?.full_name : 'Morgz (moi)'} onClose={() => setView(null)} actions={<>
           <button className="btn" onClick={() => { setEdit(view); setView(null); }}>Modifier</button>
           <button className="btn ghost" onClick={() => { setEditEx({ investor_id: view.investor_id || '', piece_id: view.id }); setView(null); }}>+ Frais</button>
           {view.status !== 'vendue' && <button className="btn ghost" onClick={() => { setEdit({ ...view, status: 'vendue', sale_price: view.target_price, sold_at: today() }); setView(null); }}>Marquer vendue</button>}
@@ -187,13 +194,13 @@ function Field({ label, full, children }) {
 function PieceForm({ initial, investors, onClose, onSaved }) {
   const [p, setP] = useState({
     title: '', brand: '', size: '', condition: 'Neuf', status: 'achetee', purchase_price: '', target_price: '', sale_price: '',
-    fees: 0, purchased_at: today(), target_days: 30, sold_at: '', photos: [], proofs: [], notes: '', investor_id: investors[0]?.id || '',
+    fees: 0, purchased_at: today(), target_days: 30, sold_at: '', photos: [], proofs: [], notes: '', investor_id: '',
     ...initial,
   });
   const { busy, err, run } = useBusy();
   const set = (k) => (e) => setP({ ...p, [k]: e.target.value });
   const num = (k) => (e) => setP({ ...p, [k]: e.target.value === '' ? '' : Number(e.target.value) });
-  const share = investors.find((i) => i.id === p.investor_id)?.share_pct ?? 60;
+  const share = p.investor_id ? (investors.find((i) => i.id === p.investor_id)?.share_pct ?? 60) : 0;
   const nb = pieceNumbers({ ...p }, share);
 
   const upload = (kind) => async (e) => {
@@ -220,9 +227,9 @@ function PieceForm({ initial, investors, onClose, onSaved }) {
           <Field label="Modèle"><input className="in-f" required value={p.title} onChange={set('title')} placeholder="Hoodie Scroll Logo" /></Field>
           <Field label="Taille"><input className="in-f" value={p.size} onChange={set('size')} /></Field>
           <Field label="État"><input className="in-f" value={p.condition} onChange={set('condition')} /></Field>
-          <Field label="Partenaire">
+          <Field label="Pour qui ?">
             <select value={p.investor_id || ''} onChange={set('investor_id')}>
-              <option value="">Non attribuée</option>
+              <option value="">Morgz (moi) — 100 % de la marge</option>
               {investors.map((i) => <option key={i.id} value={i.id}>{i.full_name || i.email}</option>)}
             </select>
           </Field>
@@ -252,7 +259,7 @@ function PieceForm({ initial, investors, onClose, onSaved }) {
         </div>
         <div className="kv">
           <div><div className="k">{p.status === 'vendue' ? 'Marge réelle' : 'Marge visée'}</div><div className="v">{eur(p.status === 'vendue' ? nb.marginReal ?? 0 : nb.marginTarget)}</div></div>
-          <div><div className="k">Part partenaire ({share} %)</div><div className="v pos">{eur(nb.investorPart, true)}</div></div>
+          {p.investor_id ? <div><div className="k">Part partenaire ({share} %)</div><div className="v pos">{eur(nb.investorPart, true)}</div></div> : <div><div className="k">Pour</div><div className="v">Morgz</div></div>}
           <div><div className="k">Ta part ({100 - share} %)</div><div className="v">{eur(nb.morgzPart, true)}</div></div>
         </div>
         <button className="btn" disabled={busy}>{busy ? 'Enregistrement…' : 'Enregistrer'}</button>
@@ -424,7 +431,7 @@ function PartnerEditor({ inv, pieces, mvts, exps = [], onClose, reload, onDelete
         <b style={{ color: 'var(--warn)' }}>Supprimer ce partenaire</b>
         <p className="m" style={{ color: 'var(--ink-2)', fontSize: 13.5, margin: '6px 0 12px' }}>
           Son compte et tout son historique d'argent seront supprimés définitivement.
-          {pieces.length > 0 && ` Ses ${pieces.length} pièce${pieces.length > 1 ? 's' : ''} resteront dans ta liste, en « Non attribuée ».`}
+          {pieces.length > 0 && ` Ses ${pieces.length} pièce${pieces.length > 1 ? 's' : ''} resteront dans ta liste, en « Pour Morgz ».`}
           {active > 0 && ` Attention : ${active} pièce${active > 1 ? 's sont' : ' est'} encore en cours.`}
         </p>
         {!del ? <button className="btn danger sm" onClick={() => setDel(true)}>Supprimer…</button> : (

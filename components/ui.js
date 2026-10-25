@@ -30,7 +30,7 @@ export function TopBar({ me, admin }) {
           <span className="pill">PARTNER</span>
           <span className="sp" />
           {admin && <span className="badge dark">Admin</span>}
-          <span className="who">{me?.full_name || me?.email}</span>
+          <span className="who">{admin ? 'Morgz' : me?.full_name || me?.email}</span>
           <button className="btn ghost sm" onClick={async () => { await api.signOut(); r.replace('/login'); }}>Déconnexion</button>
         </div>
       </div>
@@ -53,7 +53,7 @@ export function Badge({ status }) {
   return <span className={'badge ' + s.tone}>{s.label}</span>;
 }
 
-export function PieceCard({ p, share, onClick, owner }) {
+export function PieceCard({ p, share, onClick, owner, mine }) {
   const nb = pieceNumbers(p, share);
   const tm = timing(p);
   return (
@@ -75,8 +75,8 @@ export function PieceCard({ p, share, onClick, owner }) {
             <div style={{ fontWeight: 700 }}>{eur(nb.sold ? p.sale_price : p.target_price)}</div>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div className="m">Ta part</div>
-            <div className={'big ' + (nb.investorPart >= 0 ? 'pos' : 'neg')}>{eur(nb.investorPart, true)}</div>
+            <div className="m">{mine ? 'Ta part' : owner ? 'Part partenaire' : 'Ta part'}</div>
+            <div className={'big ' + ((mine ? nb.morgzPart : nb.investorPart) >= 0 ? 'pos' : 'neg')}>{eur(mine ? nb.morgzPart : nb.investorPart, true)}</div>
           </div>
         </div>
         {tm && (
@@ -103,7 +103,7 @@ export function Modal({ onClose, children }) {
   );
 }
 
-export function PieceDetail({ p, share, onClose, actions }) {
+export function PieceDetail({ p, share, onClose, actions, mine, owner }) {
   const nb = pieceNumbers(p, share);
   const tm = timing(p);
   const sh = Number(share) || 60;
@@ -118,11 +118,15 @@ export function PieceDetail({ p, share, onClose, actions }) {
         <div><div className="k">Frais</div><div className="v">{eur(Number(p.fees || 0) + Number(p.extra_fees || 0))}</div></div>
         <div><div className="k">{nb.sold ? 'Prix de vente' : 'Prix visé'}</div><div className="v">{eur(nb.sold ? p.sale_price : p.target_price)}</div></div>
         <div><div className="k">{nb.sold ? 'Marge réelle' : 'Marge visée'}</div><div className="v">{eur(nb.sold ? nb.marginReal : nb.marginTarget)}</div></div>
-        <div><div className="k">Ta part ({sh} %)</div><div className={'v ' + (nb.investorPart >= 0 ? 'pos' : 'neg')}>{eur(nb.investorPart, true)}</div></div>
-        <div><div className="k">Rendement</div><div className="v">{nb.roiPct.toFixed(0)} %</div></div>
+        {mine
+          ? <div><div className="k">Ta part (100 %)</div><div className={'v ' + (nb.morgzPart >= 0 ? 'pos' : 'neg')}>{eur(nb.morgzPart, true)}</div></div>
+          : <div><div className="k">{owner ? `Part de ${owner} (${sh} %)` : `Ta part (${sh} %)`}</div><div className={'v ' + (nb.investorPart >= 0 ? 'pos' : 'neg')}>{eur(nb.investorPart, true)}</div></div>}
+        <div><div className="k">Rendement</div><div className="v">{(mine ? (nb.cost > 0 ? nb.morgzPart / nb.cost * 100 : 0) : nb.roiPct).toFixed(0)} %</div></div>
       </div>
-      <div className="split"><i style={{ width: sh + '%' }} /><u style={{ width: 100 - sh + '%' }} /></div>
-      <div className="row m" style={{ color: 'var(--muted)', fontSize: 12.5 }}><span>Toi · {sh} %</span><span>morgz · {100 - sh} %</span></div>
+      {mine ? <div className="m" style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 10 }}>Pièce pour Morgz · 100 % de la marge pour toi</div> : <>
+        <div className="split"><i style={{ width: sh + '%' }} /><u style={{ width: 100 - sh + '%' }} /></div>
+        <div className="row m" style={{ color: 'var(--muted)', fontSize: 12.5 }}><span>{owner || 'Toi'} · {sh} %</span><span>Morgz · {100 - sh} %</span></div>
+      </>}
       {tm && (
         <div style={{ marginTop: 18 }}>
           <div className="row"><b>Délai</b><span className="m" style={{ color: 'var(--muted)' }}>Acheté le {new Date(p.purchased_at).toLocaleDateString('fr-FR')}{p.sold_at ? ' · vendu le ' + new Date(p.sold_at).toLocaleDateString('fr-FR') : ' · objectif ' + tm.due.toLocaleDateString('fr-FR')}</span></div>

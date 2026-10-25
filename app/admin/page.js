@@ -52,7 +52,12 @@ export default function Admin() {
 
   const capital = investors.reduce((a, i) => a + investorSummary([], mvts.filter((m) => m.investor_id === i.id)).capital, 0);
   const active = pieces.filter((p) => p.status === 'achetee' || p.status === 'en_vente');
-  const engage = active.reduce((a, p) => a + pieceNumbers(p).cost, 0);
+  const activeInv = active.filter((p) => p.investor_id);
+  const activeMine = active.filter((p) => !p.investor_id);
+  const engage = activeInv.reduce((a, p) => a + pieceNumbers(p).cost, 0);
+  const engageMine = activeMine.reduce((a, p) => a + pieceNumbers(p).cost, 0);
+  const myMv = mvts.filter((m) => !m.investor_id);
+  const mySum = (t) => myMv.filter((m) => m.type === t).reduce((a, m) => a + Number(m.amount || 0), 0);
   const sold = pieces.filter((p) => p.status === 'vendue');
   const shareP = (p) => (p.investor_id ? shareOf(p.investor_id) : 0);
   const morgzReal = sold.reduce((a, p) => a + pieceNumbers(p, shareP(p)).morgzPart, 0);
@@ -63,6 +68,8 @@ export default function Admin() {
     - generalPaid.reduce((a, e) => a + Number(e.amount) * shareE(e) / 100, 0);
   const morgzNet = morgzReal - generalPaid.reduce((a, e) => a + Number(e.amount) * (100 - shareE(e)) / 100, 0);
   const acc = morgzSummary(pieces, exps, shareOf);
+  // Mon capital (fonds propres) = mes apports − mes retraits + mes gains nets réalisés.
+  const myCapital = mySum('apport') - mySum('retrait') - mySum('versement_gains') + acc.solde;
   const pieceName = (id) => { const p = pieces.find((x) => x.id === id); return p ? (p.brand ? p.brand + ' — ' : '') + p.title : 'Pièce supprimée'; };
   const exOf = (id) => exps.filter((e) => e.investor_id === id);
   const shown = pieces.filter((p) => (filter === 'all' || p.status === filter)
@@ -79,8 +86,8 @@ export default function Admin() {
         </section>
 
         <div className="stats">
-          <Stat dark k="Capital partenaires" v={eur(capital)} h={`${eur(capital - engage - generalAll)} disponibles`} />
-          <Stat k="Engagé en pièces" v={eur(engage)} h={`${active.length} en cours`} />
+          <Stat dark k="Capital partenaires" v={eur(capital)} h={`${eur(engage)} engagés · ${eur(capital - engage - generalAll)} disponibles`} />
+          <Stat k="Mon capital (fonds propres)" v={eur(myCapital)} h={`${eur(engageMine)} engagés · ${eur(myCapital - engageMine)} disponibles`} />
           <Stat k="Ta marge réalisée" v={eur(morgzNet, true)} h="Part Morgz sur pièces vendues, après frais" />
           <Stat k="Dû aux partenaires" v={eur(invReal, true)} h="Gains réalisés, avant versements" />
         </div>
@@ -96,7 +103,7 @@ export default function Admin() {
             {tab === 'investors' && <button className="btn" onClick={() => setNewInv(true)}>+ Nouveau partenaire</button>}
             {tab === 'frais' && <button className="btn" onClick={() => setEditEx({})}>+ Nouveau frais</button>}
             {tab === 'compte' && <button className="btn" onClick={() => setEditEx({ investor_id: '' })}>+ Frais perso</button>}
-            {tab === 'mvts' && <button className="btn" onClick={() => setNewMv(true)} disabled={!investors.length}>+ Nouveau mouvement</button>}
+            {tab === 'mvts' && <button className="btn" onClick={() => setNewMv(true)}>+ Nouveau mouvement</button>}
           </div>
         </div>
 
@@ -142,11 +149,11 @@ export default function Admin() {
 
         {tab === 'mvts' && (mvts.length === 0 ? <div className="empty">Aucun mouvement. Enregistre le premier apport.</div> : (
           <div className="scroll"><table className="tbl">
-            <thead><tr><th>Date</th><th>Partenaire</th><th>Mouvement</th><th>Note</th><th className="r">Montant</th><th></th></tr></thead>
+            <thead><tr><th>Date</th><th>Pour</th><th>Mouvement</th><th>Note</th><th className="r">Montant</th><th></th></tr></thead>
             <tbody>{mvts.map((m) => (
               <tr key={m.id}>
                 <td>{new Date(m.date).toLocaleDateString('fr-FR')}</td>
-                <td>{byId[m.investor_id]?.full_name || '—'}</td>
+                <td>{m.investor_id ? byId[m.investor_id]?.full_name || '—' : <b>Morgz (fonds propres)</b>}</td>
                 <td><b>{MV[m.type]}</b></td>
                 <td className="m" style={{ color: 'var(--muted)' }}>{m.note}</td>
                 <td className="r"><b>{m.type === 'apport' ? '+' : '−'}{eur(m.amount)}</b></td>
@@ -324,19 +331,19 @@ function InvestorForm({ initial, onClose, onSaved }) {
 
 function MovementForm({ investors, initial, fixedInvestor, onClose, onSaved }) {
   const editing = !!initial?.id;
-  const [m, setM] = useState({ investor_id: fixedInvestor || investors[0]?.id, type: 'apport', amount: '', date: today(), note: '', ...initial });
+  const [m, setM] = useState({ investor_id: fixedInvestor || '', type: 'apport', amount: '', date: today(), note: '', ...initial });
   const { busy, err, run } = useBusy();
   const set = (k) => (e) => setM({ ...m, [k]: e.target.value });
   return (
     <Modal onClose={onClose}>
       <h2>{editing ? 'Modifier le mouvement' : 'Nouveau mouvement'}</h2>
       <form onSubmit={(e) => { e.preventDefault(); run(async () => {
-        const row = { investor_id: m.investor_id, type: m.type, amount: Number(m.amount), date: m.date, note: m.note || '' };
+        const row = { investor_id: m.investor_id || null, type: m.type, amount: Number(m.amount), date: m.date, note: m.note || '' };
         if (editing) await api.updateMovement({ id: m.id, ...row }); else await api.saveMovement(row);
         onSaved();
       }); }}>
         <div className="fgrid">
-          <Field label="Partenaire"><select value={m.investor_id} onChange={set('investor_id')} disabled={!!fixedInvestor}>{investors.map((i) => <option key={i.id} value={i.id}>{i.full_name || i.email}</option>)}</select></Field>
+          <Field label="Pour qui ?"><select value={m.investor_id || ''} onChange={set('investor_id')} disabled={!!fixedInvestor}>{!fixedInvestor && <option value="">Morgz (mes fonds propres)</option>}{investors.map((i) => <option key={i.id} value={i.id}>{i.full_name || i.email}</option>)}</select></Field>
           <Field label="Type"><select value={m.type} onChange={set('type')}>{Object.entries(MV).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
           <Field label="Montant (€)"><input className="in-f" type="number" step="0.01" min="0" required value={m.amount} onChange={set('amount')} /></Field>
           <Field label="Date"><input className="in-f" type="date" required value={m.date} onChange={set('date')} /></Field>

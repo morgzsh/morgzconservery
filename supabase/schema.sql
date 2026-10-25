@@ -36,7 +36,7 @@ create table if not exists public.pieces (
 -- 3. Mouvements d'argent (apports, retraits, versements de gains)
 create table if not exists public.movements (
   id uuid primary key default gen_random_uuid(),
-  investor_id uuid not null references public.profiles(id) on delete cascade,
+  investor_id uuid references public.profiles(id) on delete cascade, -- vide = fonds propres de Morgz
   type text not null check (type in ('apport','retrait','versement_gains')),
   amount numeric not null check (amount >= 0),
   date date not null default current_date,

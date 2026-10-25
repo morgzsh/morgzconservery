@@ -86,7 +86,7 @@ create policy "movements admin write" on public.movements for all using (public.
 -- 6 bis. Frais (déplacements…)
 create table if not exists public.expenses (
   id uuid primary key default gen_random_uuid(),
-  investor_id uuid not null references public.profiles(id) on delete cascade,
+  investor_id uuid references public.profiles(id) on delete cascade,
   piece_id uuid references public.pieces(id) on delete set null,
   type text not null default 'deplacement' check (type in ('deplacement','train','uber','autre')),
   amount numeric not null check (amount >= 0),

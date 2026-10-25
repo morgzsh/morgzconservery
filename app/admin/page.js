@@ -2,7 +2,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, DEMO } from '@/lib/data';
-import { STATUS, EXPENSE_TYPES, EXPENSE_STATUS, eur, investorSummary, pieceNumbers, withExpenses } from '@/lib/calc';
+import { STATUS, EXPENSE_TYPES, EXPENSE_STATUS, eur, investorSummary, pieceNumbers, withExpenses, morgzSummary } from '@/lib/calc';
+import AccountChart from '@/components/AccountChart';
 import { TopBar, Stat, PieceCard, PieceDetail, Modal, Footer, Badge, ExpenseList, ExpenseRule, useBusy } from '@/components/ui';
 
 const MV = { apport: 'Apport', retrait: 'Retrait de capital', versement_gains: 'Gains versés' };
@@ -52,12 +53,15 @@ export default function Admin() {
   const active = pieces.filter((p) => p.status === 'achetee' || p.status === 'en_vente');
   const engage = active.reduce((a, p) => a + pieceNumbers(p).cost, 0);
   const sold = pieces.filter((p) => p.status === 'vendue');
-  const morgzReal = sold.reduce((a, p) => a + pieceNumbers(p, shareOf(p.investor_id)).morgzPart, 0);
+  const shareP = (p) => (p.investor_id ? shareOf(p.investor_id) : 0);
+  const morgzReal = sold.reduce((a, p) => a + pieceNumbers(p, shareP(p)).morgzPart, 0);
   const generalPaid = exps.filter((e) => !e.piece_id && e.status === 'regle');
-  const generalAll = exps.filter((e) => !e.piece_id).reduce((a, e) => a + Number(e.amount || 0), 0);
-  const invReal = sold.reduce((a, p) => a + pieceNumbers(p, shareOf(p.investor_id)).investorPart, 0)
-    - generalPaid.reduce((a, e) => a + Number(e.amount) * shareOf(e.investor_id) / 100, 0);
-  const morgzNet = morgzReal - generalPaid.reduce((a, e) => a + Number(e.amount) * (100 - shareOf(e.investor_id)) / 100, 0);
+  const generalAll = exps.filter((e) => !e.piece_id && e.investor_id).reduce((a, e) => a + Number(e.amount || 0), 0);
+  const shareE = (e) => (e.investor_id ? shareOf(e.investor_id) : 0);
+  const invReal = sold.reduce((a, p) => a + pieceNumbers(p, shareP(p)).investorPart, 0)
+    - generalPaid.reduce((a, e) => a + Number(e.amount) * shareE(e) / 100, 0);
+  const morgzNet = morgzReal - generalPaid.reduce((a, e) => a + Number(e.amount) * (100 - shareE(e)) / 100, 0);
+  const acc = morgzSummary(pieces, exps, shareOf);
   const pieceName = (id) => { const p = pieces.find((x) => x.id === id); return p ? (p.brand ? p.brand + ' — ' : '') + p.title : 'Pièce supprimée'; };
   const exOf = (id) => exps.filter((e) => e.investor_id === id);
   const shown = pieces.filter((p) => filter === 'all' || p.status === filter);
@@ -81,14 +85,15 @@ export default function Admin() {
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <div className="tabs">
-            {[['pieces', 'Pièces'], ['investors', 'Partenaires'], ['mvts', 'Mouvements'], ['frais', 'Frais']].map(([k, l]) => (
+            {[['pieces', 'Pièces'], ['investors', 'Partenaires'], ['mvts', 'Mouvements'], ['frais', 'Frais'], ['compte', 'Mes comptes']].map(([k, l]) => (
               <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
             ))}
           </div>
           <div style={{ marginBottom: 22 }}>
             {tab === 'pieces' && <button className="btn" onClick={() => setEdit({})}>+ Nouvelle pièce</button>}
             {tab === 'investors' && <button className="btn" onClick={() => setNewInv(true)}>+ Nouveau partenaire</button>}
-            {tab === 'frais' && <button className="btn" onClick={() => setEditEx({})} disabled={!investors.length}>+ Nouveau frais</button>}
+            {tab === 'frais' && <button className="btn" onClick={() => setEditEx({})}>+ Nouveau frais</button>}
+            {tab === 'compte' && <button className="btn" onClick={() => setEditEx({ investor_id: '' })}>+ Frais perso</button>}
             {tab === 'mvts' && <button className="btn" onClick={() => setNewMv(true)} disabled={!investors.length}>+ Nouveau mouvement</button>}
           </div>
         </div>
@@ -145,17 +150,19 @@ export default function Admin() {
         ))}
         {tab === 'frais' && (
           <>
-            <ExpenseList items={exps} pieceName={pieceName} owner={(e) => byId[e.investor_id]?.full_name}
+            <ExpenseList items={exps} pieceName={pieceName} owner={(e) => (e.investor_id ? byId[e.investor_id]?.full_name : 'Perso')}
               actions={(e) => <><button className="btn ghost sm" onClick={() => setEditEx(e)}>Modifier</button>{' '}<button className="btn danger sm" onClick={async () => { if (confirm('Supprimer ce frais ?')) { await api.deleteExpense(e.id); load(); } }}>Suppr.</button></>} />
             <ExpenseRule share={60} />
           </>
         )}
+        {tab === 'compte' && <MyAccount acc={acc} byId={byId} onOpen={(p) => setView(p)} />}
         <Footer />
       </main>
 
       {view && (
         <PieceDetail p={view} share={shareOf(view.investor_id)} onClose={() => setView(null)} actions={<>
           <button className="btn" onClick={() => { setEdit(view); setView(null); }}>Modifier</button>
+          <button className="btn ghost" onClick={() => { setEditEx({ investor_id: view.investor_id || '', piece_id: view.id }); setView(null); }}>+ Frais</button>
           {view.status !== 'vendue' && <button className="btn ghost" onClick={() => { setEdit({ ...view, status: 'vendue', sale_price: view.target_price, sold_at: today() }); setView(null); }}>Marquer vendue</button>}
           <button className="btn danger" onClick={async () => { if (confirm('Supprimer cette pièce ?')) { await api.deletePiece(view.id); setView(null); load(); } }}>Supprimer</button>
         </>} />
@@ -336,6 +343,7 @@ function MovementForm({ investors, initial, fixedInvestor, onClose, onSaved }) {
 }
 
 function PartnerEditor({ inv, pieces, mvts, exps = [], onClose, reload, onDeleted }) {
+  const [ex, setEx] = useState(null);
   const [f, setF] = useState({ full_name: inv.full_name || '', email: inv.email || '', share_pct: inv.share_pct ?? 60, password: '' });
   const [saved, setSaved] = useState(false);
   const [mv, setMv] = useState(null);
@@ -346,6 +354,7 @@ function PartnerEditor({ inv, pieces, mvts, exps = [], onClose, reload, onDelete
   const s = investorSummary(pieces, mvts, f.share_pct, exps);
   const active = pieces.filter((p) => p.status === 'achetee' || p.status === 'en_vente').length;
 
+  if (ex) return <ExpenseForm initial={ex} investors={[inv]} pieces={pieces} onClose={() => setEx(null)} onSaved={async () => { setEx(null); await reload(); }} />;
   if (mv) return <MovementForm investors={[inv]} fixedInvestor={inv.id} initial={mv} onClose={() => setMv(null)} onSaved={async () => { setMv(null); await reload(); }} />;
 
   return (
@@ -404,6 +413,13 @@ function PartnerEditor({ inv, pieces, mvts, exps = [], onClose, reload, onDelete
         </table></div>
       )}
 
+      <div className="row" style={{ margin: '28px 0 10px' }}>
+        <h3 style={{ margin: 0, fontSize: 17 }}>Frais</h3>
+        <button className="btn ghost sm" onClick={() => setEx({ investor_id: inv.id })}>+ Frais</button>
+      </div>
+      <ExpenseList items={exps} compact pieceName={(id) => { const p = pieces.find((x) => x.id === id); return p ? p.title : 'Pièce'; }}
+        actions={(e) => <><button className="btn ghost sm" onClick={() => setEx(e)}>Modifier</button>{' '}<button className="btn danger sm" onClick={() => run(async () => { await api.deleteExpense(e.id); await reload(); })}>×</button></>} />
+
       <div style={{ marginTop: 30, padding: 18, borderRadius: 18, border: '1px solid #f3d3c4', background: '#fff8f5' }}>
         <b style={{ color: 'var(--warn)' }}>Supprimer ce partenaire</b>
         <p className="m" style={{ color: 'var(--ink-2)', fontSize: 13.5, margin: '6px 0 12px' }}>
@@ -429,25 +445,25 @@ function PartnerEditor({ inv, pieces, mvts, exps = [], onClose, reload, onDelete
 
 function ExpenseForm({ initial, investors, pieces, onClose, onSaved }) {
   const editing = !!initial?.id;
-  const [e, setE] = useState({ investor_id: investors[0]?.id || '', piece_id: '', type: 'train', amount: '', date: today(), label: '', status: 'prevu', proof: null, ...initial, piece_id: initial?.piece_id || '' });
+  const [e, setE] = useState({ investor_id: investors[0]?.id ?? '', piece_id: '', type: 'train', amount: '', date: today(), label: '', status: 'regle', proof: null, ...initial, piece_id: initial?.piece_id || '' });
   const { busy, err, run } = useBusy();
   const set = (k) => (ev) => setE({ ...e, [k]: ev.target.value });
-  const own = pieces.filter((p) => p.investor_id === e.investor_id);
+  const own = pieces.filter((p) => (p.investor_id || '') === (e.investor_id || ''));
   const piece = pieces.find((p) => p.id === e.piece_id);
   const already = piece ? (piece.linked_expenses || []).filter((x) => x.id !== e.id).reduce((a, x) => a + Number(x.amount || 0), 0) : 0;
   const cap = piece ? 0.1 * Number(piece.purchase_price || 0) : 0;
   const over = piece && cap > 0 && already + Number(e.amount || 0) > cap;
-  const share = investors.find((i) => i.id === e.investor_id)?.share_pct ?? 60;
+  const share = e.investor_id ? (investors.find((i) => i.id === e.investor_id)?.share_pct ?? 60) : 0;
 
   return (
     <Modal onClose={onClose}>
       <h2>{editing ? 'Modifier le frais' : 'Nouveau frais'}</h2>
       <form onSubmit={(ev) => { ev.preventDefault(); run(async () => {
-        const row = { investor_id: e.investor_id, piece_id: e.piece_id || null, type: e.type, amount: Number(e.amount) || 0, date: e.date, label: e.label || '', status: e.status, proof: e.proof || null };
+        const row = { investor_id: e.investor_id || null, piece_id: e.piece_id || null, type: e.type, amount: Number(e.amount) || 0, date: e.date, label: e.label || '', status: e.status, proof: e.proof || null };
         await api.saveExpense(editing ? { id: e.id, ...row } : row); onSaved();
       }); }}>
         <div className="fgrid">
-          <Field label="Partenaire"><select value={e.investor_id} onChange={(ev) => setE({ ...e, investor_id: ev.target.value, piece_id: '' })}>{investors.map((i) => <option key={i.id} value={i.id}>{i.full_name || i.email}</option>)}</select></Field>
+          <Field label="Partenaire"><select value={e.investor_id || ''} onChange={(ev) => setE({ ...e, investor_id: ev.target.value, piece_id: '' })}>{investors.map((i) => <option key={i.id} value={i.id}>{i.full_name || i.email}</option>)}{investors.length !== 1 || !initial?.investor_id ? <option value="">Aucun — frais perso / pièce perso</option> : null}</select></Field>
           <Field label="Rattaché à">
             <select value={e.piece_id} onChange={set('piece_id')}>
               <option value="">Général (pas une pièce précise)</option>
@@ -456,7 +472,7 @@ function ExpenseForm({ initial, investors, pieces, onClose, onSaved }) {
           </Field>
           <Field label="Type"><select value={e.type} onChange={set('type')}>{Object.entries(EXPENSE_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
           <Field label="Statut"><select value={e.status} onChange={set('status')}>{Object.entries(EXPENSE_STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
-          <Field label="Montant (€)"><input className="in-f" type="number" step="0.01" min="0" required value={e.amount} onChange={set('amount')} /></Field>
+          <Field label="Montant exact payé (€)"><input className="in-f" type="number" step="0.01" min="0" required value={e.amount} onChange={set('amount')} placeholder="ex. 47,90" /></Field>
           <Field label="Date"><input className="in-f" type="date" required value={e.date} onChange={set('date')} /></Field>
           <Field label="Libellé (visible par le partenaire)" full><input className="in-f" value={e.label} onChange={set('label')} placeholder="Moitié du billet de train Paris" /></Field>
           <Field label="Justificatif (optionnel)" full>
@@ -470,10 +486,50 @@ function ExpenseForm({ initial, investors, pieces, onClose, onSaved }) {
           {piece && <div><div className="k">Plafond 10 % pièce</div><div className={'v ' + (over ? 'neg' : '')}>{eur(cap)}</div></div>}
         </div>
         {over && <div className="err" style={{ marginTop: 0 }}>Au-dessus du plafond de 10 % du prix d'achat : à faire valider par le partenaire.</div>}
-        <ExpenseRule share={share} />
+        {e.investor_id ? <ExpenseRule share={share} /> : <p className="m" style={{ color: 'var(--muted)', fontSize: 13, marginTop: 12 }}>Frais perso : entièrement à ta charge, déduit de tes comptes.</p>}
         <button className="btn" style={{ marginTop: 6 }} disabled={busy}>{busy ? '…' : 'Enregistrer'}</button>
         {err && <div className="err">{err}</div>}
       </form>
     </Modal>
+  );
+}
+
+function MyAccount({ acc, byId, onOpen }) {
+  const rows = [...acc.ledger].reverse();
+  return (
+    <>
+      <div className="stats">
+        <Stat dark k="Mon solde" v={eur(acc.solde)} h="Gains nets réalisés, après frais" />
+        <Stat k="Ce mois-ci" v={eur(acc.mois, true)} h={new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })} />
+        <Stat k="En attente" v={eur(acc.pending, true)} h={`${acc.nbActive} pièce${acc.nbActive > 1 ? 's' : ''} en cours · visé, non garanti`} />
+        <Stat k="Frais payés (ma part)" v={eur(acc.fraisPaid)} h={`${acc.nbSales} vente${acc.nbSales > 1 ? 's' : ''} · ${acc.winRate.toFixed(0)} % gagnantes`} />
+      </div>
+      <AccountChart ledger={acc.ledger} />
+      <div className="kv" style={{ marginTop: 18 }}>
+        <div><div className="k">Total gains</div><div className="v pos">{eur(acc.gains, true)}</div></div>
+        <div><div className="k">Total pertes</div><div className="v neg">{eur(acc.pertes)}</div></div>
+        <div><div className="k">Meilleure vente</div><div className="v" style={{ fontSize: 15 }}>{acc.best ? `${acc.best.label} · ${eur(acc.best.amount, true)}` : '—'}</div></div>
+      </div>
+      <div className="section">
+        <h2>Journal de mes comptes</h2>
+        {rows.length === 0 ? <div className="empty">Aucune opération pour le moment.</div> : (
+          <div className="scroll"><table className="tbl journal">
+            <thead><tr><th>Date</th><th>Opération</th><th>Partenaire</th><th className="r">Montant</th><th className="r">Solde</th></tr></thead>
+            <tbody>{rows.map((x, i) => (
+              <tr key={i} style={x.piece ? { cursor: 'pointer' } : null} onClick={() => x.piece && onOpen(x.piece)}>
+                <td>{new Date(x.date).toLocaleDateString('fr-FR')}</td>
+                <td><b>{x.kind === 'vente' ? 'Vente' : 'Frais'}</b><div className="m" style={{ color: 'var(--muted)', fontSize: 12.5 }}>{x.label}{x.kind === 'vente' && x.margin != null ? ` · marge ${eur(x.margin)}` : ''}</div></td>
+                <td className="m" style={{ color: 'var(--muted)' }}>{x.investor_id ? byId[x.investor_id]?.full_name || '—' : 'Perso (100 %)'}</td>
+                <td className={'r ' + (x.amount >= 0 ? 'pos' : 'neg')}><b>{eur(x.amount, true)}</b></td>
+                <td className="r">{eur(x.balance)}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+        <p className="m" style={{ color: 'var(--muted)', fontSize: 13, marginTop: 12 }}>
+          Ta part = 100 % moins la part du partenaire, sur la marge de chaque pièce vendue (100 % sur tes pièces perso), moins ta part des frais réglés. Les frais rattachés à une pièce sont déjà déduits de sa marge.
+        </p>
+      </div>
+    </>
   );
 }

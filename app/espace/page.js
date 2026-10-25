@@ -2,8 +2,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, DEMO } from '@/lib/data';
-import { eur, investorSummary } from '@/lib/calc';
-import { TopBar, Stat, PieceCard, PieceDetail, Modal, Footer, useBusy } from '@/components/ui';
+import { eur, investorSummary, withExpenses } from '@/lib/calc';
+import { TopBar, Stat, PieceCard, PieceDetail, Modal, Footer, ExpenseList, ExpenseRule, useBusy } from '@/components/ui';
 
 const MV = { apport: 'Apport', retrait: 'Retrait de capital', versement_gains: 'Gains versés' };
 
@@ -12,6 +12,7 @@ export default function Espace() {
   const [me, setMe] = useState(null);
   const [pieces, setPieces] = useState([]);
   const [mvts, setMvts] = useState([]);
+  const [exps, setExps] = useState([]);
   const [open, setOpen] = useState(null);
   const [pwd, setPwd] = useState(false);
 
@@ -22,14 +23,17 @@ export default function Espace() {
       if (!m) return r.replace('/login');
       if (m.role === 'admin') return r.replace('/admin');
       setMe(m);
-      setPieces(await api.pieces(m.id));
+      const ex = await api.expenses(m.id);
+      setExps(ex);
+      setPieces(withExpenses(await api.pieces(m.id), ex));
       setMvts(await api.movements(m.id));
     })();
   }, [r]);
 
   if (!me) return null;
   const share = me.share_pct ?? 60;
-  const s = investorSummary(pieces, mvts, share);
+  const s = investorSummary(pieces, mvts, share, exps);
+  const pieceName = (id) => { const p = pieces.find((x) => x.id === id); return p ? (p.brand ? p.brand + ' — ' : '') + p.title : 'Pièce'; };
   const first = (me.full_name || '').split(' ')[0];
 
   return (
@@ -55,6 +59,12 @@ export default function Espace() {
         ) : (
           <div className="grid">{pieces.map((p) => <PieceCard key={p.id} p={p} share={share} onClick={() => setOpen(p)} />)}</div>
         )}
+
+        <div className="section">
+          <div className="row"><h2 style={{ margin: 0 }}>Frais</h2>{exps.length > 0 && <span className="m" style={{ color: 'var(--muted)' }}>Total {eur(s.fraisTotal)} · ta part {eur(s.fraisPart)}</span>}</div>
+          <div style={{ marginTop: 14 }}><ExpenseList items={exps} pieceName={pieceName} /></div>
+          <ExpenseRule share={share} />
+        </div>
 
         <div className="section">
           <h2>Historique</h2>

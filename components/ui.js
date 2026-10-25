@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, DEMO } from '@/lib/data';
-import { STATUS, eur, pieceNumbers, timing } from '@/lib/calc';
+import { STATUS, EXPENSE_TYPES, EXPENSE_STATUS, EXPENSE_RULE, eur, pieceNumbers, timing } from '@/lib/calc';
 
 export function isCapture() {
   if (typeof window === 'undefined') return false;
@@ -115,7 +115,7 @@ export function PieceDetail({ p, share, onClose, actions }) {
       {p.photos?.length > 0 && <div className="gal" style={{ marginTop: 18 }}>{p.photos.map((u, i) => <a key={i} href={u} target="_blank" rel="noreferrer"><img src={u} alt="" /></a>)}</div>}
       <div className="kv">
         <div><div className="k">Prix d'achat</div><div className="v">{eur(p.purchase_price)}</div></div>
-        <div><div className="k">Frais</div><div className="v">{eur(p.fees)}</div></div>
+        <div><div className="k">Frais</div><div className="v">{eur(Number(p.fees || 0) + Number(p.extra_fees || 0))}</div></div>
         <div><div className="k">{nb.sold ? 'Prix de vente' : 'Prix visé'}</div><div className="v">{eur(nb.sold ? p.sale_price : p.target_price)}</div></div>
         <div><div className="k">{nb.sold ? 'Marge réelle' : 'Marge visée'}</div><div className="v">{eur(nb.sold ? nb.marginReal : nb.marginTarget)}</div></div>
         <div><div className="k">Ta part ({sh} %)</div><div className={'v ' + (nb.investorPart >= 0 ? 'pos' : 'neg')}>{eur(nb.investorPart, true)}</div></div>
@@ -127,6 +127,12 @@ export function PieceDetail({ p, share, onClose, actions }) {
         <div style={{ marginTop: 18 }}>
           <div className="row"><b>Délai</b><span className="m" style={{ color: 'var(--muted)' }}>Acheté le {new Date(p.purchased_at).toLocaleDateString('fr-FR')}{p.sold_at ? ' · vendu le ' + new Date(p.sold_at).toLocaleDateString('fr-FR') : ' · objectif ' + tm.due.toLocaleDateString('fr-FR')}</span></div>
           <div className={'bar' + (tm.late ? ' late' : '')}><i style={{ width: tm.pct + '%' }} /></div>
+        </div>
+      )}
+      {p.linked_expenses?.length > 0 && (
+        <div style={{ marginTop: 18 }}>
+          <b>Frais rattachés</b>
+          <ExpenseList items={p.linked_expenses} compact />
         </div>
       )}
       {p.notes && <p style={{ marginTop: 18, color: 'var(--ink-2)' }}>{p.notes}</p>}
@@ -151,4 +157,34 @@ export function useBusy() {
 
 export function Footer() {
   return <div className="foot">morgzconservery. partner · Paris — Worldwide · Montants visés indicatifs, capital et gains non garantis.</div>;
+}
+
+/** Liste des frais, côté partenaire comme côté admin. */
+export function ExpenseList({ items, pieceName, owner, actions, compact }) {
+  if (!items.length) return <div className="empty" style={compact ? { padding: 20 } : null}>Aucun frais.</div>;
+  return (
+    <div className="scroll" style={compact ? { marginTop: 8 } : null}><table className="tbl" style={compact ? { boxShadow: 'none', border: '1px solid var(--line)' } : null}>
+      <thead><tr><th>Date</th><th>Frais</th>{!compact && <th>Rattaché à</th>}<th>Statut</th><th className="r">Montant</th>{actions && <th></th>}</tr></thead>
+      <tbody>{items.map((e) => (
+        <tr key={e.id}>
+          <td>{new Date(e.date).toLocaleDateString('fr-FR')}</td>
+          <td><b>{EXPENSE_TYPES[e.type] || 'Frais'}</b>{e.label ? <div className="m" style={{ color: 'var(--muted)', fontSize: 12.5 }}>{e.label}</div> : null}
+            {e.proof?.url ? <div><a className="m" href={e.proof.url} target="_blank" rel="noreferrer" style={{ fontSize: 12.5 }}>📎 {e.proof.name || 'Justificatif'}</a></div> : null}</td>
+          {!compact && <td className="m" style={{ color: 'var(--muted)' }}>{[owner?.(e), e.piece_id ? (pieceName?.(e.piece_id) || 'Pièce') : 'Général'].filter(Boolean).join(' · ')}</td>}
+          <td><span className={'badge ' + (e.status === 'regle' ? 'dark' : 'muted')}>{EXPENSE_STATUS[e.status] || 'Prévu'}</span></td>
+          <td className="r"><b>−{eur(e.amount)}</b></td>
+          {actions && <td className="r" style={{ whiteSpace: 'nowrap' }}>{actions(e)}</td>}
+        </tr>
+      ))}</tbody>
+    </table></div>
+  );
+}
+
+export function ExpenseRule({ share }) {
+  const sh = Number(share) || 60;
+  return (
+    <p className="m" style={{ color: 'var(--muted)', fontSize: 13, marginTop: 12 }}>
+      {EXPENSE_RULE} Les frais sont déduits de la marge avant le partage {sh}/{100 - sh} : tu en portes {sh} %.
+    </p>
+  );
 }

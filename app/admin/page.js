@@ -2,8 +2,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, DEMO } from '@/lib/data';
-import { STATUS, eur, investorSummary, pieceNumbers } from '@/lib/calc';
-import { TopBar, Stat, PieceCard, PieceDetail, Modal, Footer, Badge, useBusy } from '@/components/ui';
+import { STATUS, EXPENSE_TYPES, EXPENSE_STATUS, eur, investorSummary, pieceNumbers, withExpenses } from '@/lib/calc';
+import { TopBar, Stat, PieceCard, PieceDetail, Modal, Footer, Badge, ExpenseList, ExpenseRule, useBusy } from '@/components/ui';
 
 const MV = { apport: 'Apport', retrait: 'Retrait de capital', versement_gains: 'Gains versés' };
 const today = () => new Date().toISOString().slice(0, 10);
@@ -22,10 +22,14 @@ export default function Admin() {
   const [editInv, setEditInv] = useState(null);
   const [newMv, setNewMv] = useState(false);
   const [editMv, setEditMv] = useState(null);
+  const [exps, setExps] = useState([]);
+  const [editEx, setEditEx] = useState(null);
 
   const load = useCallback(async () => {
     setProfiles(await api.profiles());
-    setPieces(await api.pieces());
+    const ex = await api.expenses();
+    setExps(ex);
+    setPieces(withExpenses(await api.pieces(), ex));
     setMvts(await api.movements());
   }, []);
 
@@ -49,7 +53,13 @@ export default function Admin() {
   const engage = active.reduce((a, p) => a + pieceNumbers(p).cost, 0);
   const sold = pieces.filter((p) => p.status === 'vendue');
   const morgzReal = sold.reduce((a, p) => a + pieceNumbers(p, shareOf(p.investor_id)).morgzPart, 0);
-  const invReal = sold.reduce((a, p) => a + pieceNumbers(p, shareOf(p.investor_id)).investorPart, 0);
+  const generalPaid = exps.filter((e) => !e.piece_id && e.status === 'regle');
+  const generalAll = exps.filter((e) => !e.piece_id).reduce((a, e) => a + Number(e.amount || 0), 0);
+  const invReal = sold.reduce((a, p) => a + pieceNumbers(p, shareOf(p.investor_id)).investorPart, 0)
+    - generalPaid.reduce((a, e) => a + Number(e.amount) * shareOf(e.investor_id) / 100, 0);
+  const morgzNet = morgzReal - generalPaid.reduce((a, e) => a + Number(e.amount) * (100 - shareOf(e.investor_id)) / 100, 0);
+  const pieceName = (id) => { const p = pieces.find((x) => x.id === id); return p ? (p.brand ? p.brand + ' — ' : '') + p.title : 'Pièce supprimée'; };
+  const exOf = (id) => exps.filter((e) => e.investor_id === id);
   const shown = pieces.filter((p) => filter === 'all' || p.status === filter);
 
   return (
@@ -63,21 +73,22 @@ export default function Admin() {
         </section>
 
         <div className="stats">
-          <Stat dark k="Capital partenaires" v={eur(capital)} h={`${eur(capital - engage)} disponibles`} />
+          <Stat dark k="Capital partenaires" v={eur(capital)} h={`${eur(capital - engage - generalAll)} disponibles`} />
           <Stat k="Engagé en pièces" v={eur(engage)} h={`${active.length} en cours`} />
-          <Stat k="Ta marge réalisée" v={eur(morgzReal, true)} h="Part morgz sur pièces vendues" />
+          <Stat k="Ta marge réalisée" v={eur(morgzNet, true)} h="Part morgz sur pièces vendues, après frais" />
           <Stat k="Dû aux partenaires" v={eur(invReal, true)} h="Gains réalisés, avant versements" />
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <div className="tabs">
-            {[['pieces', 'Pièces'], ['investors', 'Partenaires'], ['mvts', 'Mouvements']].map(([k, l]) => (
+            {[['pieces', 'Pièces'], ['investors', 'Partenaires'], ['mvts', 'Mouvements'], ['frais', 'Frais']].map(([k, l]) => (
               <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
             ))}
           </div>
           <div style={{ marginBottom: 22 }}>
             {tab === 'pieces' && <button className="btn" onClick={() => setEdit({})}>+ Nouvelle pièce</button>}
             {tab === 'investors' && <button className="btn" onClick={() => setNewInv(true)}>+ Nouveau partenaire</button>}
+            {tab === 'frais' && <button className="btn" onClick={() => setEditEx({})} disabled={!investors.length}>+ Nouveau frais</button>}
             {tab === 'mvts' && <button className="btn" onClick={() => setNewMv(true)} disabled={!investors.length}>+ Nouveau mouvement</button>}
           </div>
         </div>
@@ -101,7 +112,7 @@ export default function Admin() {
           <div className="scroll"><table className="tbl">
             <thead><tr><th>Partenaire</th><th>Part</th><th className="r">Capital</th><th className="r">Engagé</th><th className="r">Gains réalisés</th><th className="r">Valeur</th><th></th></tr></thead>
             <tbody>{investors.map((i) => {
-              const s = investorSummary(pieces.filter((p) => p.investor_id === i.id), mvts.filter((m) => m.investor_id === i.id), i.share_pct);
+              const s = investorSummary(pieces.filter((p) => p.investor_id === i.id), mvts.filter((m) => m.investor_id === i.id), i.share_pct, exOf(i.id));
               return (
                 <tr key={i.id}>
                   <td style={{ cursor: 'pointer' }} onClick={() => setEditInv(i)}><b>{i.full_name || '—'}</b><div className="m" style={{ color: 'var(--muted)' }}>{i.email}</div></td>
@@ -132,6 +143,13 @@ export default function Admin() {
             ))}</tbody>
           </table></div>
         ))}
+        {tab === 'frais' && (
+          <>
+            <ExpenseList items={exps} pieceName={pieceName} owner={(e) => byId[e.investor_id]?.full_name}
+              actions={(e) => <><button className="btn ghost sm" onClick={() => setEditEx(e)}>Modifier</button>{' '}<button className="btn danger sm" onClick={async () => { if (confirm('Supprimer ce frais ?')) { await api.deleteExpense(e.id); load(); } }}>Suppr.</button></>} />
+            <ExpenseRule share={60} />
+          </>
+        )}
         <Footer />
       </main>
 
@@ -145,9 +163,10 @@ export default function Admin() {
       {edit && <PieceForm initial={edit} investors={investors} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(); }} />}
       {newInv && <InvestorForm onClose={() => setNewInv(false)} onSaved={() => { setNewInv(false); load(); }} />}
       {editInv && byId[editInv.id] && (
-        <PartnerEditor inv={byId[editInv.id]} pieces={pieces.filter((p) => p.investor_id === editInv.id)} mvts={mvts.filter((m) => m.investor_id === editInv.id)}
+        <PartnerEditor inv={byId[editInv.id]} pieces={pieces.filter((p) => p.investor_id === editInv.id)} mvts={mvts.filter((m) => m.investor_id === editInv.id)} exps={exOf(editInv.id)}
           onClose={() => setEditInv(null)} reload={load} onDeleted={() => { setEditInv(null); load(); }} />
       )}
+      {editEx && <ExpenseForm initial={editEx} investors={investors} pieces={pieces} onClose={() => setEditEx(null)} onSaved={() => { setEditEx(null); load(); }} />}
       {editMv && <MovementForm investors={investors} initial={editMv} onClose={() => setEditMv(null)} onSaved={() => { setEditMv(null); load(); }} />}
       {newMv && <MovementForm investors={investors} onClose={() => setNewMv(false)} onSaved={() => { setNewMv(false); load(); }} />}
     </>
@@ -316,7 +335,7 @@ function MovementForm({ investors, initial, fixedInvestor, onClose, onSaved }) {
   );
 }
 
-function PartnerEditor({ inv, pieces, mvts, onClose, reload, onDeleted }) {
+function PartnerEditor({ inv, pieces, mvts, exps = [], onClose, reload, onDeleted }) {
   const [f, setF] = useState({ full_name: inv.full_name || '', email: inv.email || '', share_pct: inv.share_pct ?? 60, password: '' });
   const [saved, setSaved] = useState(false);
   const [mv, setMv] = useState(null);
@@ -324,7 +343,7 @@ function PartnerEditor({ inv, pieces, mvts, onClose, reload, onDeleted }) {
   const [confirmName, setConfirmName] = useState('');
   const { busy, err, run } = useBusy();
   const set = (k) => (e) => { setSaved(false); setF({ ...f, [k]: e.target.value }); };
-  const s = investorSummary(pieces, mvts, f.share_pct);
+  const s = investorSummary(pieces, mvts, f.share_pct, exps);
   const active = pieces.filter((p) => p.status === 'achetee' || p.status === 'en_vente').length;
 
   if (mv) return <MovementForm investors={[inv]} fixedInvestor={inv.id} initial={mv} onClose={() => setMv(null)} onSaved={async () => { setMv(null); await reload(); }} />;
@@ -341,6 +360,8 @@ function PartnerEditor({ inv, pieces, mvts, onClose, reload, onDeleted }) {
         <div><div className="k">Gains réalisés</div><div className="v pos">{eur(s.gainsRealises, true)}</div></div>
         <div><div className="k">Gains versés</div><div className="v">{eur(s.verses)}</div></div>
         <div><div className="k">Valeur actuelle</div><div className="v">{eur(s.valeur)}</div></div>
+        <div><div className="k">Frais ({exps.length})</div><div className="v">{eur(s.fraisTotal)}</div></div>
+        <div><div className="k">Sa part des frais</div><div className="v">{eur(s.fraisPart)}</div></div>
       </div>
 
       <h3 style={{ margin: '22px 0 10px', fontSize: 17 }}>Informations</h3>
@@ -402,6 +423,57 @@ function PartnerEditor({ inv, pieces, mvts, onClose, reload, onDeleted }) {
         )}
       </div>
       {err && <div className="err">{err}</div>}
+    </Modal>
+  );
+}
+
+function ExpenseForm({ initial, investors, pieces, onClose, onSaved }) {
+  const editing = !!initial?.id;
+  const [e, setE] = useState({ investor_id: investors[0]?.id || '', piece_id: '', type: 'train', amount: '', date: today(), label: '', status: 'prevu', proof: null, ...initial, piece_id: initial?.piece_id || '' });
+  const { busy, err, run } = useBusy();
+  const set = (k) => (ev) => setE({ ...e, [k]: ev.target.value });
+  const own = pieces.filter((p) => p.investor_id === e.investor_id);
+  const piece = pieces.find((p) => p.id === e.piece_id);
+  const already = piece ? (piece.linked_expenses || []).filter((x) => x.id !== e.id).reduce((a, x) => a + Number(x.amount || 0), 0) : 0;
+  const cap = piece ? 0.1 * Number(piece.purchase_price || 0) : 0;
+  const over = piece && cap > 0 && already + Number(e.amount || 0) > cap;
+  const share = investors.find((i) => i.id === e.investor_id)?.share_pct ?? 60;
+
+  return (
+    <Modal onClose={onClose}>
+      <h2>{editing ? 'Modifier le frais' : 'Nouveau frais'}</h2>
+      <form onSubmit={(ev) => { ev.preventDefault(); run(async () => {
+        const row = { investor_id: e.investor_id, piece_id: e.piece_id || null, type: e.type, amount: Number(e.amount) || 0, date: e.date, label: e.label || '', status: e.status, proof: e.proof || null };
+        await api.saveExpense(editing ? { id: e.id, ...row } : row); onSaved();
+      }); }}>
+        <div className="fgrid">
+          <Field label="Partenaire"><select value={e.investor_id} onChange={(ev) => setE({ ...e, investor_id: ev.target.value, piece_id: '' })}>{investors.map((i) => <option key={i.id} value={i.id}>{i.full_name || i.email}</option>)}</select></Field>
+          <Field label="Rattaché à">
+            <select value={e.piece_id} onChange={set('piece_id')}>
+              <option value="">Général (pas une pièce précise)</option>
+              {own.map((p) => <option key={p.id} value={p.id}>{(p.brand ? p.brand + ' — ' : '') + p.title}</option>)}
+            </select>
+          </Field>
+          <Field label="Type"><select value={e.type} onChange={set('type')}>{Object.entries(EXPENSE_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
+          <Field label="Statut"><select value={e.status} onChange={set('status')}>{Object.entries(EXPENSE_STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
+          <Field label="Montant (€)"><input className="in-f" type="number" step="0.01" min="0" required value={e.amount} onChange={set('amount')} /></Field>
+          <Field label="Date"><input className="in-f" type="date" required value={e.date} onChange={set('date')} /></Field>
+          <Field label="Libellé (visible par le partenaire)" full><input className="in-f" value={e.label} onChange={set('label')} placeholder="Moitié du billet de train Paris" /></Field>
+          <Field label="Justificatif (optionnel)" full>
+            <input type="file" onChange={(ev) => { const f = ev.target.files[0]; if (!f) return; run(async () => { const url = await api.upload(f); setE((x) => ({ ...x, proof: { name: f.name, url } })); }); ev.target.value = ''; }} />
+            {e.proof?.name && <div className="chips" style={{ marginTop: 8 }}><span className="badge">{e.proof.name} <button type="button" style={{ border: 0, background: 'none', cursor: 'pointer' }} onClick={() => setE({ ...e, proof: null })}>×</button></span></div>}
+          </Field>
+        </div>
+        <div className="kv">
+          <div><div className="k">Part partenaire ({share} %)</div><div className="v">{eur(Number(e.amount || 0) * share / 100)}</div></div>
+          <div><div className="k">Ta part ({100 - share} %)</div><div className="v">{eur(Number(e.amount || 0) * (100 - share) / 100)}</div></div>
+          {piece && <div><div className="k">Plafond 10 % pièce</div><div className={'v ' + (over ? 'neg' : '')}>{eur(cap)}</div></div>}
+        </div>
+        {over && <div className="err" style={{ marginTop: 0 }}>Au-dessus du plafond de 10 % du prix d'achat : à faire valider par le partenaire.</div>}
+        <ExpenseRule share={share} />
+        <button className="btn" style={{ marginTop: 6 }} disabled={busy}>{busy ? '…' : 'Enregistrer'}</button>
+        {err && <div className="err">{err}</div>}
+      </form>
     </Modal>
   );
 }

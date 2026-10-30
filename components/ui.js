@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, DEMO } from '@/lib/data';
-import { STATUS, EXPENSE_TYPES, EXPENSE_STATUS, EXPENSE_RULE, eur, pieceNumbers, timing } from '@/lib/calc';
+import { STATUS, EXPENSE_TYPES, EXPENSE_STATUS, EXPENSE_RULE, eur, pieceNumbers, timing, partnerPortion } from '@/lib/calc';
 
 export function isCapture() {
   if (typeof window === 'undefined') return false;
@@ -120,7 +120,7 @@ export function PieceDetail({ p, share, onClose, actions, mine, owner }) {
         <div><div className="k">{nb.sold ? 'Marge réelle' : 'Marge visée'}</div><div className="v">{eur(nb.sold ? nb.marginReal : nb.marginTarget)}</div></div>
         {mine
           ? <div><div className="k">Ta part (100 %)</div><div className={'v ' + (nb.morgzPart >= 0 ? 'pos' : 'neg')}>{eur(nb.morgzPart, true)}</div></div>
-          : <div><div className="k">{owner ? `Part de ${owner} (${sh} %)` : `Ta part (${sh} %)`}</div><div className={'v ' + (nb.investorPart >= 0 ? 'pos' : 'neg')}>{eur(nb.investorPart, true)}</div></div>}
+          : <div><div className="k">{owner ? `Part de ${owner} (${nb.forced ? 'fixée' : sh + ' %'})` : `Ta part (${nb.forced ? 'fixée' : sh + ' %'})`}</div><div className={'v ' + (nb.investorPart >= 0 ? 'pos' : 'neg')}>{eur(nb.investorPart, true)}</div></div>}
         <div><div className="k">Rendement</div><div className="v">{(mine ? (nb.cost > 0 ? nb.morgzPart / nb.cost * 100 : 0) : nb.roiPct).toFixed(0)} %</div></div>
       </div>
       {mine ? <div className="m" style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 10 }}>Pièce pour Morgz · 100 % de la marge pour toi</div> : <>
@@ -164,7 +164,8 @@ export function Footer() {
 }
 
 /** Liste des frais, côté partenaire comme côté admin. */
-export function ExpenseList({ items, pieceName, owner, actions, compact }) {
+export function ExpenseList({ items, pieceName, owner, actions, compact, share, partLabel = 'Part partenaire' }) {
+  const shOf = (e) => (typeof share === 'function' ? share(e.investor_id) : share);
   if (!items.length) return <div className="empty" style={compact ? { padding: 20 } : null}>Aucun frais.</div>;
   return (
     <div className="scroll" style={compact ? { marginTop: 8 } : null}><table className="tbl" style={compact ? { boxShadow: 'none', border: '1px solid var(--line)' } : null}>
@@ -173,10 +174,11 @@ export function ExpenseList({ items, pieceName, owner, actions, compact }) {
         <tr key={e.id}>
           <td>{new Date(e.date).toLocaleDateString('fr-FR')}</td>
           <td><b>{EXPENSE_TYPES[e.type] || 'Frais'}</b>{e.label ? <div className="m" style={{ color: 'var(--muted)', fontSize: 12.5 }}>{e.label}</div> : null}
+            {e.note ? <div className="m" style={{ color: 'var(--ink-2)', fontSize: 12.5, marginTop: 3, whiteSpace: 'pre-line' }}>📝 {e.note}</div> : null}
             {e.proof?.url ? <div><a className="m" href={e.proof.url} target="_blank" rel="noreferrer" style={{ fontSize: 12.5 }}>📎 {e.proof.name || 'Justificatif'}</a></div> : null}</td>
           {!compact && <td className="m" style={{ color: 'var(--muted)' }}>{[owner?.(e), e.piece_id ? (pieceName?.(e.piece_id) || 'Pièce') : 'Général'].filter(Boolean).join(' · ')}</td>}
           <td><span className={'badge ' + (e.status === 'regle' ? 'dark' : 'muted')}>{EXPENSE_STATUS[e.status] || 'Prévu'}</span></td>
-          <td className="r"><b>−{eur(e.amount)}</b></td>
+          <td className="r"><b>−{eur(e.amount)}</b>{share !== undefined && e.investor_id ? <div className="m" style={{ color: 'var(--muted)', fontSize: 12 }}>{partLabel} : {eur(partnerPortion(e, shOf(e)))}</div> : share !== undefined ? <div className="m" style={{ color: 'var(--muted)', fontSize: 12 }}>Perso</div> : null}</td>
           {actions && <td className="r" style={{ whiteSpace: 'nowrap' }}>{actions(e)}</td>}
         </tr>
       ))}</tbody>
@@ -188,7 +190,7 @@ export function ExpenseRule({ share }) {
   const sh = Number(share) || 60;
   return (
     <p className="m" style={{ color: 'var(--muted)', fontSize: 13, marginTop: 12 }}>
-      {EXPENSE_RULE} Les frais sont déduits de la marge avant le partage {sh}/{100 - sh} : tu en portes {sh} %.
+      {EXPENSE_RULE} Par défaut, les frais sont déduits de la marge avant le partage {sh}/{100 - sh}, sauf répartition indiquée sur la ligne.
     </p>
   );
 }

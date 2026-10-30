@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, DEMO } from '@/lib/data';
-import { STATUS, EXPENSE_TYPES, EXPENSE_STATUS, eur, investorSummary, pieceNumbers, withExpenses, morgzSummary } from '@/lib/calc';
+import { STATUS, EXPENSE_TYPES, EXPENSE_STATUS, eur, investorSummary, pieceNumbers, withExpenses, morgzSummary, partnerPortion } from '@/lib/calc';
 import AccountChart from '@/components/AccountChart';
 import { TopBar, Stat, PieceCard, PieceDetail, Modal, Footer, Badge, ExpenseList, ExpenseRule, useBusy } from '@/components/ui';
 
@@ -65,8 +65,8 @@ export default function Admin() {
   const generalAll = exps.filter((e) => !e.piece_id && e.investor_id).reduce((a, e) => a + Number(e.amount || 0), 0);
   const shareE = (e) => (e.investor_id ? shareOf(e.investor_id) : 0);
   const invReal = sold.reduce((a, p) => a + pieceNumbers(p, shareP(p)).investorPart, 0)
-    - generalPaid.reduce((a, e) => a + Number(e.amount) * shareE(e) / 100, 0);
-  const morgzNet = morgzReal - generalPaid.reduce((a, e) => a + Number(e.amount) * (100 - shareE(e)) / 100, 0);
+    - generalPaid.reduce((a, e) => a + partnerPortion(e, shareE(e)), 0);
+  const morgzNet = morgzReal - generalPaid.reduce((a, e) => a + Number(e.amount) - partnerPortion(e, shareE(e)), 0);
   const acc = morgzSummary(pieces, exps, shareOf);
   // Mon capital (fonds propres) = mes apports − mes retraits + mes gains nets réalisés.
   const myCapital = mySum('apport') - mySum('retrait') - mySum('versement_gains') + acc.solde;
@@ -149,7 +149,7 @@ export default function Admin() {
 
         {tab === 'mvts' && (mvts.length === 0 ? <div className="empty">Aucun mouvement. Enregistre le premier apport.</div> : (
           <div className="scroll"><table className="tbl">
-            <thead><tr><th>Date</th><th>Pour</th><th>Mouvement</th><th>Note</th><th className="r">Montant</th><th></th></tr></thead>
+            <thead><tr><th>Date</th><th>Pour</th><th>Mouvement</th><th>Mention</th><th className="r">Montant</th><th></th></tr></thead>
             <tbody>{mvts.map((m) => (
               <tr key={m.id}>
                 <td>{new Date(m.date).toLocaleDateString('fr-FR')}</td>
@@ -164,7 +164,7 @@ export default function Admin() {
         ))}
         {tab === 'frais' && (
           <>
-            <ExpenseList items={exps} pieceName={pieceName} owner={(e) => (e.investor_id ? byId[e.investor_id]?.full_name : 'Perso')}
+            <ExpenseList items={exps} pieceName={pieceName} share={shareOf} owner={(e) => (e.investor_id ? byId[e.investor_id]?.full_name : 'Perso')}
               actions={(e) => <><button className="btn ghost sm" onClick={() => setEditEx(e)}>Modifier</button>{' '}<button className="btn danger sm" onClick={async () => { if (confirm('Supprimer ce frais ?')) { await api.deleteExpense(e.id); load(); } }}>Suppr.</button></>} />
             <ExpenseRule share={60} />
           </>
@@ -225,8 +225,10 @@ function PieceForm({ initial, investors, onClose, onSaved }) {
     <Modal onClose={onClose}>
       <h2>{initial.id ? 'Modifier la pièce' : 'Nouvelle pièce'}</h2>
       <form onSubmit={(e) => { e.preventDefault(); run(async () => {
-        const row = { ...p, purchase_price: Number(p.purchase_price) || 0, target_price: Number(p.target_price) || 0, fees: Number(p.fees) || 0, target_days: Number(p.target_days) || 30, sale_price: p.sale_price === '' ? null : Number(p.sale_price) };
+        const row = { ...p, investor_amount: p.investor_id && p.investor_amount !== '' && p.investor_amount !== null && p.investor_amount !== undefined ? Number(p.investor_amount) : null, purchase_price: Number(p.purchase_price) || 0, target_price: Number(p.target_price) || 0, fees: Number(p.fees) || 0, target_days: Number(p.target_days) || 30, sale_price: p.sale_price === '' ? null : Number(p.sale_price) };
         if (row.status !== 'vendue') { row.sale_price = null; row.sold_at = null; }
+        // N'envoie la colonne que si elle sert (compatibilité avant la mise à jour de la base).
+        if (row.investor_amount === null && (initial.investor_amount === undefined || initial.investor_amount === null)) delete row.investor_amount;
         await api.savePiece(row); onSaved();
       }); }}>
         <div className="fgrid">
@@ -248,6 +250,7 @@ function PieceForm({ initial, investors, onClose, onSaved }) {
           <Field label="Frais (port, plateforme, authentif.)"><input className="in-f" type="number" step="0.01" min="0" value={p.fees} onChange={num('fees')} /></Field>
           <Field label="Délai visé (jours)"><input className="in-f" type="number" min="1" value={p.target_days} onChange={num('target_days')} /></Field>
           <Field label="Date d'achat"><input className="in-f" type="date" value={p.purchased_at || ''} onChange={set('purchased_at')} /></Field>
+          {p.investor_id ? <Field label="Part du partenaire en € (vide = calcul auto)"><input className="in-f" type="number" step="0.01" value={p.investor_amount ?? ''} onChange={num('investor_amount')} placeholder={'auto : ' + Math.round(pieceNumbers({ ...p, investor_amount: null }, share).investorPart * 100) / 100 + ' €'} /></Field> : <div />}
           {p.status === 'vendue' ? (
             <>
               <Field label="Prix de vente réel (€)"><input className="in-f" type="number" step="0.01" min="0" required value={p.sale_price ?? ''} onChange={num('sale_price')} /></Field>
@@ -262,12 +265,12 @@ function PieceForm({ initial, investors, onClose, onSaved }) {
             <input type="file" multiple onChange={upload('proofs')} />
             <div className="chips" style={{ marginTop: 8 }}>{(p.proofs || []).map((f, i) => <span key={i} className="badge">{f.name} <button type="button" style={{ border: 0, background: 'none', cursor: 'pointer' }} onClick={() => setP({ ...p, proofs: p.proofs.filter((_, j) => j !== i) })}>×</button></span>)}</div>
           </Field>
-          <Field label="Notes (visibles par le partenaire)" full><textarea value={p.notes || ''} onChange={set('notes')} /></Field>
+          <Field label="Mentions / notes (visibles par le partenaire)" full><textarea value={p.notes || ''} onChange={set('notes')} /></Field>
         </div>
         <div className="kv">
           <div><div className="k">{p.status === 'vendue' ? 'Marge réelle' : 'Marge visée'}</div><div className="v">{eur(p.status === 'vendue' ? nb.marginReal ?? 0 : nb.marginTarget)}</div></div>
-          {p.investor_id ? <div><div className="k">Part partenaire ({share} %)</div><div className="v pos">{eur(nb.investorPart, true)}</div></div> : <div><div className="k">Pour</div><div className="v">Morgz</div></div>}
-          <div><div className="k">Ta part ({100 - share} %)</div><div className="v">{eur(nb.morgzPart, true)}</div></div>
+          {p.investor_id ? <div><div className="k">Part partenaire ({nb.forced ? 'fixée à la main' : share + ' %'})</div><div className="v pos">{eur(nb.investorPart, true)}</div></div> : <div><div className="k">Pour</div><div className="v">Morgz</div></div>}
+          <div><div className="k">Ta part{nb.forced ? '' : ` (${100 - share} %)`}</div><div className="v">{eur(nb.morgzPart, true)}</div></div>
         </div>
         <button className="btn" disabled={busy}>{busy ? 'Enregistrement…' : 'Enregistrer'}</button>
         {err && <div className="err">{err}</div>}
@@ -347,7 +350,7 @@ function MovementForm({ investors, initial, fixedInvestor, onClose, onSaved }) {
           <Field label="Type"><select value={m.type} onChange={set('type')}>{Object.entries(MV).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
           <Field label="Montant (€)"><input className="in-f" type="number" step="0.01" min="0" required value={m.amount} onChange={set('amount')} /></Field>
           <Field label="Date"><input className="in-f" type="date" required value={m.date} onChange={set('date')} /></Field>
-          <Field label="Note" full><input className="in-f" value={m.note} onChange={set('note')} placeholder="Virement reçu, réf. PARTNER…" /></Field>
+          <Field label="Mention (visible par le partenaire)" full><textarea value={m.note || ''} onChange={set('note')} placeholder="Virement reçu, réf. PARTNER…" /></Field>
         </div>
         <button className="btn" style={{ marginTop: 18 }} disabled={busy}>Enregistrer</button>
         {err && <div className="err">{err}</div>}
@@ -459,7 +462,10 @@ function PartnerEditor({ inv, pieces, mvts, exps = [], onClose, reload, onDelete
 
 function ExpenseForm({ initial, investors, pieces, onClose, onSaved }) {
   const editing = !!initial?.id;
-  const [e, setE] = useState({ investor_id: investors[0]?.id ?? '', piece_id: '', type: 'train', amount: '', date: today(), label: '', status: 'regle', proof: null, ...initial, piece_id: initial?.piece_id || '' });
+  const [e, setE] = useState({ investor_id: investors[0]?.id ?? '', piece_id: '', type: 'train', amount: '', date: today(), label: '', status: 'regle', proof: null, note: '', ...initial, piece_id: initial?.piece_id || '' });
+  const hasCustom = initial?.investor_amount !== null && initial?.investor_amount !== undefined && initial?.investor_amount !== '';
+  const [split, setSplit] = useState(hasCustom ? 'custom' : 'auto');
+  const [custom, setCustom] = useState(hasCustom ? initial.investor_amount : '');
   const { busy, err, run } = useBusy();
   const set = (k) => (ev) => setE({ ...e, [k]: ev.target.value });
   const own = pieces.filter((p) => (p.investor_id || '') === (e.investor_id || ''));
@@ -468,12 +474,18 @@ function ExpenseForm({ initial, investors, pieces, onClose, onSaved }) {
   const cap = piece ? 0.1 * Number(piece.purchase_price || 0) : 0;
   const over = piece && cap > 0 && already + Number(e.amount || 0) > cap;
   const share = e.investor_id ? (investors.find((i) => i.id === e.investor_id)?.share_pct ?? 60) : 0;
+  const amt = Number(e.amount || 0);
+  const invAmount = !e.investor_id ? null : split === 'auto' ? null : split === 'partner' ? amt : split === 'morgz' ? 0 : (custom === '' ? null : Number(custom));
+  const invPart = !e.investor_id ? 0 : invAmount === null ? amt * share / 100 : invAmount;
 
   return (
     <Modal onClose={onClose}>
       <h2>{editing ? 'Modifier le frais' : 'Nouveau frais'}</h2>
       <form onSubmit={(ev) => { ev.preventDefault(); run(async () => {
-        const row = { investor_id: e.investor_id || null, piece_id: e.piece_id || null, type: e.type, amount: Number(e.amount) || 0, date: e.date, label: e.label || '', status: e.status, proof: e.proof || null };
+        if (invAmount !== null && (invAmount < 0 || invAmount > amt)) throw new Error('La part du partenaire doit être entre 0 et le montant du frais.');
+        const row = { investor_id: e.investor_id || null, piece_id: e.piece_id || null, type: e.type, amount: amt, date: e.date, label: e.label || '', status: e.status, proof: e.proof || null, investor_amount: invAmount, note: e.note || '' };
+        if (row.investor_amount === null && (initial?.investor_amount === undefined || initial?.investor_amount === null)) delete row.investor_amount;
+        if (!row.note && !initial?.note) delete row.note;
         await api.saveExpense(editing ? { id: e.id, ...row } : row); onSaved();
       }); }}>
         <div className="fgrid">
@@ -489,18 +501,30 @@ function ExpenseForm({ initial, investors, pieces, onClose, onSaved }) {
           <Field label="Montant exact payé (€)"><input className="in-f" type="number" step="0.01" min="0" required value={e.amount} onChange={set('amount')} placeholder="ex. 47,90" /></Field>
           <Field label="Date"><input className="in-f" type="date" required value={e.date} onChange={set('date')} /></Field>
           <Field label="Libellé (visible par le partenaire)" full><input className="in-f" value={e.label} onChange={set('label')} placeholder="Moitié du billet de train Paris" /></Field>
+          {e.investor_id ? <>
+            <Field label="Qui paie ce frais ?">
+              <select value={split} onChange={(ev) => setSplit(ev.target.value)}>
+                <option value="auto">Selon la part ({share} / {100 - share})</option>
+                <option value="custom">Je choisis le montant</option>
+                <option value="partner">100 % le partenaire</option>
+                <option value="morgz">100 % moi (Morgz)</option>
+              </select>
+            </Field>
+            {split === 'custom' ? <Field label="Part payée par le partenaire (€)"><input className="in-f" type="number" step="0.01" min="0" value={custom} onChange={(ev) => setCustom(ev.target.value)} placeholder="ex. 25" /></Field> : <div />}
+          </> : null}
+          <Field label="Mention (visible par le partenaire)" full><textarea value={e.note || ''} onChange={set('note')} placeholder="ex. Billet partagé avec un autre achat, aller simple…" /></Field>
           <Field label="Justificatif (optionnel)" full>
             <input type="file" onChange={(ev) => { const f = ev.target.files[0]; if (!f) return; run(async () => { const url = await api.upload(f); setE((x) => ({ ...x, proof: { name: f.name, url } })); }); ev.target.value = ''; }} />
             {e.proof?.name && <div className="chips" style={{ marginTop: 8 }}><span className="badge">{e.proof.name} <button type="button" style={{ border: 0, background: 'none', cursor: 'pointer' }} onClick={() => setE({ ...e, proof: null })}>×</button></span></div>}
           </Field>
         </div>
         <div className="kv">
-          <div><div className="k">Part partenaire ({share} %)</div><div className="v">{eur(Number(e.amount || 0) * share / 100)}</div></div>
-          <div><div className="k">Ta part ({100 - share} %)</div><div className="v">{eur(Number(e.amount || 0) * (100 - share) / 100)}</div></div>
+          <div><div className="k">Payé par le partenaire</div><div className="v">{eur(invPart)}</div></div>
+          <div><div className="k">Payé par toi</div><div className="v">{eur(amt - invPart)}</div></div>
           {piece && <div><div className="k">Plafond 10 % pièce</div><div className={'v ' + (over ? 'neg' : '')}>{eur(cap)}</div></div>}
         </div>
         {over && <div className="err" style={{ marginTop: 0 }}>Au-dessus du plafond de 10 % du prix d'achat : à faire valider par le partenaire.</div>}
-        {e.investor_id ? <ExpenseRule share={share} /> : <p className="m" style={{ color: 'var(--muted)', fontSize: 13, marginTop: 12 }}>Frais perso : entièrement à ta charge, déduit de tes comptes.</p>}
+        {e.investor_id ? (split === 'auto' ? <ExpenseRule share={share} /> : <p className="m" style={{ color: 'var(--muted)', fontSize: 13, marginTop: 12 }}>Répartition choisie à la main : le partenaire voit exactement ce montant.</p>) : <p className="m" style={{ color: 'var(--muted)', fontSize: 13, marginTop: 12 }}>Frais perso : entièrement à ta charge, déduit de tes comptes.</p>}
         <button className="btn" style={{ marginTop: 6 }} disabled={busy}>{busy ? '…' : 'Enregistrer'}</button>
         {err && <div className="err">{err}</div>}
       </form>

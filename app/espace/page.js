@@ -62,7 +62,7 @@ export default function Espace() {
 
         <div className="section">
           <div className="row"><h2 style={{ margin: 0 }}>Frais</h2>{exps.length > 0 && <span className="m" style={{ color: 'var(--muted)' }}>Total {eur(s.fraisTotal)} · ta part {eur(s.fraisPart)}</span>}</div>
-          <div style={{ marginTop: 14 }}><ExpenseList items={exps} pieceName={pieceName} /></div>
+          <div style={{ marginTop: 14 }}><ExpenseList items={exps} pieceName={pieceName} share={share} partLabel="Ta part" /></div>
           <ExpenseRule share={share} />
         </div>
 
@@ -70,7 +70,7 @@ export default function Espace() {
           <h2>Historique</h2>
           {mvts.length === 0 ? <div className="empty">Aucun mouvement.</div> : (
             <div className="scroll"><table className="tbl">
-              <thead><tr><th>Date</th><th>Mouvement</th><th>Note</th><th className="r">Montant</th></tr></thead>
+              <thead><tr><th>Date</th><th>Mouvement</th><th>Mention</th><th className="r">Montant</th></tr></thead>
               <tbody>{mvts.map((m) => (
                 <tr key={m.id}><td>{new Date(m.date).toLocaleDateString('fr-FR')}</td><td><b>{MV[m.type]}</b></td><td className="m" style={{ color: 'var(--muted)' }}>{m.note}</td><td className="r"><b>{m.type === 'apport' ? '+' : '−'}{eur(m.amount)}</b></td></tr>
               ))}</tbody>

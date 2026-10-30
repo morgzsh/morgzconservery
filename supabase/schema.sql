@@ -30,6 +30,7 @@ create table if not exists public.pieces (
   photos text[] not null default '{}',
   proofs jsonb not null default '[]',
   notes text,
+  investor_amount numeric, -- part du partenaire forcée à la main (€) ; vide = calcul auto
   created_at timestamptz not null default now()
 );
 
@@ -94,6 +95,8 @@ create table if not exists public.expenses (
   label text,
   status text not null default 'prevu' check (status in ('prevu','regle')),
   proof jsonb,
+  investor_amount numeric, -- part payée par le partenaire (€) ; vide = selon sa part en %
+  note text,
   created_at timestamptz not null default now()
 );
 

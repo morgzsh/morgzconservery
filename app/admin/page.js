@@ -54,8 +54,8 @@ export default function Admin() {
   const active = pieces.filter((p) => p.status === 'achetee' || p.status === 'en_vente');
   const activeInv = active.filter((p) => p.investor_id);
   const activeMine = active.filter((p) => !p.investor_id);
-  const engage = activeInv.reduce((a, p) => a + pieceNumbers(p).cost, 0);
-  const engageMine = activeMine.reduce((a, p) => a + pieceNumbers(p).cost, 0);
+  const engage = activeInv.reduce((a, p) => a + pieceNumbers(p, shareOf(p.investor_id)).mise, 0);
+  const engageMine = activeMine.reduce((a, p) => a + pieceNumbers(p, 0).cost, 0) + activeInv.reduce((a, p) => a + pieceNumbers(p, shareOf(p.investor_id)).morgzMise, 0);
   const myMv = mvts.filter((m) => !m.investor_id);
   const mySum = (t) => myMv.filter((m) => m.type === t).reduce((a, m) => a + Number(m.amount || 0), 0);
   const sold = pieces.filter((p) => p.status === 'vendue');
@@ -225,10 +225,13 @@ function PieceForm({ initial, investors, onClose, onSaved }) {
     <Modal onClose={onClose}>
       <h2>{initial.id ? 'Modifier la pièce' : 'Nouvelle pièce'}</h2>
       <form onSubmit={(e) => { e.preventDefault(); run(async () => {
-        const row = { ...p, investor_amount: p.investor_id && p.investor_amount !== '' && p.investor_amount !== null && p.investor_amount !== undefined ? Number(p.investor_amount) : null, purchase_price: Number(p.purchase_price) || 0, target_price: Number(p.target_price) || 0, fees: Number(p.fees) || 0, target_days: Number(p.target_days) || 30, sale_price: p.sale_price === '' ? null : Number(p.sale_price) };
+        const setv = (v) => v !== '' && v !== null && v !== undefined;
+        const row = { ...p, investor_amount: p.investor_id && setv(p.investor_amount) ? Number(p.investor_amount) : null, investor_contribution: p.investor_id && setv(p.investor_contribution) ? Number(p.investor_contribution) : null, purchase_price: Number(p.purchase_price) || 0, target_price: Number(p.target_price) || 0, fees: Number(p.fees) || 0, target_days: Number(p.target_days) || 30, sale_price: p.sale_price === '' ? null : Number(p.sale_price) };
         if (row.status !== 'vendue') { row.sale_price = null; row.sold_at = null; }
         // N'envoie la colonne que si elle sert (compatibilité avant la mise à jour de la base).
         if (row.investor_amount === null && (initial.investor_amount === undefined || initial.investor_amount === null)) delete row.investor_amount;
+        if (row.investor_contribution === null && (initial.investor_contribution === undefined || initial.investor_contribution === null)) delete row.investor_contribution;
+        if (row.investor_contribution !== null && row.investor_contribution !== undefined && row.investor_contribution > nb.cost) throw new Error('La mise du partenaire ne peut pas dépasser le prix de la pièce (' + eur(nb.cost) + ').');
         await api.savePiece(row); onSaved();
       }); }}>
         <div className="fgrid">
@@ -250,6 +253,7 @@ function PieceForm({ initial, investors, onClose, onSaved }) {
           <Field label="Frais (port, plateforme, authentif.)"><input className="in-f" type="number" step="0.01" min="0" value={p.fees} onChange={num('fees')} /></Field>
           <Field label="Délai visé (jours)"><input className="in-f" type="number" min="1" value={p.target_days} onChange={num('target_days')} /></Field>
           <Field label="Date d'achat"><input className="in-f" type="date" value={p.purchased_at || ''} onChange={set('purchased_at')} /></Field>
+          {p.investor_id ? <Field label="Mise du partenaire en € (vide = il finance tout)"><input className="in-f" type="number" step="0.01" min="0" value={p.investor_contribution ?? ''} onChange={num('investor_contribution')} placeholder={'ex. 500 sur ' + eur(nb.cost)} /></Field> : null}
           {p.investor_id ? <Field label="Part du partenaire en € (vide = calcul auto)"><input className="in-f" type="number" step="0.01" value={p.investor_amount ?? ''} onChange={num('investor_amount')} placeholder={'auto : ' + Math.round(pieceNumbers({ ...p, investor_amount: null }, share).investorPart * 100) / 100 + ' €'} /></Field> : <div />}
           {p.status === 'vendue' ? (
             <>
@@ -269,9 +273,16 @@ function PieceForm({ initial, investors, onClose, onSaved }) {
         </div>
         <div className="kv">
           <div><div className="k">{p.status === 'vendue' ? 'Marge réelle' : 'Marge visée'}</div><div className="v">{eur(p.status === 'vendue' ? nb.marginReal ?? 0 : nb.marginTarget)}</div></div>
-          {p.investor_id ? <div><div className="k">Part partenaire ({nb.forced ? 'fixée à la main' : share + ' %'})</div><div className="v pos">{eur(nb.investorPart, true)}</div></div> : <div><div className="k">Pour</div><div className="v">Morgz</div></div>}
-          <div><div className="k">Ta part{nb.forced ? '' : ` (${100 - share} %)`}</div><div className="v">{eur(nb.morgzPart, true)}</div></div>
+          {p.investor_id ? <div><div className="k">Part partenaire ({nb.forced ? 'fixée à la main' : nb.coFi ? `${Math.round(nb.ratio * 100)} % de la pièce × ${share} %` : share + ' %'})</div><div className="v pos">{eur(nb.investorPart, true)}</div></div> : <div><div className="k">Pour</div><div className="v">Morgz</div></div>}
+          <div><div className="k">Ta part{nb.forced || nb.coFi ? '' : ` (${100 - share} %)`}</div><div className="v">{eur(nb.morgzPart, true)}</div></div>
         </div>
+        {p.investor_id && nb.coFi ? (
+          <div className="kv" style={{ marginTop: -6 }}>
+            <div><div className="k">Prix de la pièce</div><div className="v">{eur(nb.cost)}</div></div>
+            <div><div className="k">Mise partenaire · ta mise</div><div className="v">{eur(nb.mise)} · {eur(nb.morgzMise)}</div></div>
+            <div><div className="k">Il récupère</div><div className="v pos">{eur(nb.retour)}</div></div>
+          </div>
+        ) : null}
         <button className="btn" disabled={busy}>{busy ? 'Enregistrement…' : 'Enregistrer'}</button>
         {err && <div className="err">{err}</div>}
       </form>

@@ -67,8 +67,8 @@ export function PieceCard({ p, share, onClick, owner, mine }) {
         <div className="m">{[p.size && 'Taille ' + p.size, p.condition, owner].filter(Boolean).join(' · ')}</div>
         <div className="row" style={{ marginTop: 12 }}>
           <div>
-            <div className="m">Achat</div>
-            <div style={{ fontWeight: 700 }}>{eur(nb.cost)}</div>
+            <div className="m">{nb.coFi && !mine ? (owner ? 'Mise part.' : 'Ta mise') : 'Achat'}</div>
+            <div style={{ fontWeight: 700 }}>{eur(nb.coFi && !mine ? nb.mise : nb.cost)}</div>
           </div>
           <div>
             <div className="m">{nb.sold ? 'Vendue' : 'Prix visé'}</div>
@@ -121,6 +121,10 @@ export function PieceDetail({ p, share, onClose, actions, mine, owner }) {
         {mine
           ? <div><div className="k">Ta part (100 %)</div><div className={'v ' + (nb.morgzPart >= 0 ? 'pos' : 'neg')}>{eur(nb.morgzPart, true)}</div></div>
           : <div><div className="k">{owner ? `Part de ${owner} (${nb.forced ? 'fixée' : sh + ' %'})` : `Ta part (${nb.forced ? 'fixée' : sh + ' %'})`}</div><div className={'v ' + (nb.investorPart >= 0 ? 'pos' : 'neg')}>{eur(nb.investorPart, true)}</div></div>}
+        {nb.coFi && !mine ? <>
+          <div><div className="k">{owner ? `Mise de ${owner}` : 'Ta mise'}</div><div className="v">{eur(nb.mise)} <span className="m" style={{ fontSize: 12, color: 'var(--muted)' }}>sur {eur(nb.cost)}</span></div></div>
+          <div><div className="k">{owner ? 'Il récupère' : 'Tu récupères'}{nb.sold ? '' : ' (visé)'}</div><div className="v pos">{eur(nb.sold ? nb.retour : nb.retourTarget)}</div></div>
+        </> : null}
         <div><div className="k">Rendement</div><div className="v">{(mine ? (nb.cost > 0 ? nb.morgzPart / nb.cost * 100 : 0) : nb.roiPct).toFixed(0)} %</div></div>
       </div>
       {mine ? <div className="m" style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 10 }}>Pièce pour Morgz · 100 % de la marge pour toi</div> : <>

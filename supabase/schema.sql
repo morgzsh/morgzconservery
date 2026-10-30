@@ -31,6 +31,7 @@ create table if not exists public.pieces (
   proofs jsonb not null default '[]',
   notes text,
   investor_amount numeric, -- part du partenaire forcée à la main (€) ; vide = calcul auto
+  investor_contribution numeric, -- mise du partenaire (€) si co-financement ; vide = il finance tout
   created_at timestamptz not null default now()
 );
 

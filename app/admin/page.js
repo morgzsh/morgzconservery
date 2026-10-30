@@ -231,7 +231,6 @@ function PieceForm({ initial, investors, onClose, onSaved }) {
         // N'envoie la colonne que si elle sert (compatibilité avant la mise à jour de la base).
         if (row.investor_amount === null && (initial.investor_amount === undefined || initial.investor_amount === null)) delete row.investor_amount;
         if (row.investor_contribution === null && (initial.investor_contribution === undefined || initial.investor_contribution === null)) delete row.investor_contribution;
-        if (row.investor_contribution !== null && row.investor_contribution !== undefined && row.investor_contribution > nb.cost) throw new Error('La mise du partenaire ne peut pas dépasser le prix de la pièce (' + eur(nb.cost) + ').');
         await api.savePiece(row); onSaved();
       }); }}>
         <div className="fgrid">
@@ -276,6 +275,7 @@ function PieceForm({ initial, investors, onClose, onSaved }) {
           {p.investor_id ? <div><div className="k">Part partenaire ({nb.forced ? 'fixée à la main' : nb.coFi ? `${Math.round(nb.ratio * 100)} % de la pièce × ${share} %` : share + ' %'})</div><div className="v pos">{eur(nb.investorPart, true)}</div></div> : <div><div className="k">Pour</div><div className="v">Morgz</div></div>}
           <div><div className="k">Ta part{nb.forced || nb.coFi ? '' : ` (${100 - share} %)`}</div><div className="v">{eur(nb.morgzPart, true)}</div></div>
         </div>
+        {p.investor_id && nb.coFi && nb.mise > nb.cost ? <p className="m" style={{ color: 'var(--muted)', fontSize: 13, margin: '-4px 0 14px' }}>Sa mise dépasse le prix de la pièce : c'est toi qui décides, c'est bien enregistré. Vérifie juste le prix d'achat si c'est une erreur de frappe.</p> : null}
         {p.investor_id && nb.coFi ? (
           <div className="kv" style={{ marginTop: -6 }}>
             <div><div className="k">Prix de la pièce</div><div className="v">{eur(nb.cost)}</div></div>

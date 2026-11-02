@@ -46,6 +46,13 @@ export default function Espace() {
           <p className="sub">Voici où en sont tes pièces.</p>
         </section>
 
+        {me.partner_message && (
+          <div className="msgcard">
+            <div className="msghead"><span className="msgdot" />Message de Morgz{me.partner_message_at && <span className="msgdate">{new Date(me.partner_message_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}</span>}</div>
+            <p>{me.partner_message}</p>
+          </div>
+        )}
+
         <div className="stats">
           <Stat dark k="Valeur actuelle" v={eur(s.valeur)} h="Capital + gains réalisés non versés" />
           <Stat k="Capital investi" v={eur(s.capital)} h={`${eur(s.engage)} engagés · ${eur(s.disponible)} disponibles`} />

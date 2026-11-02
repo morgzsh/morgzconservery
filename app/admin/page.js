@@ -401,6 +401,8 @@ function PartnerEditor({ inv, pieces, mvts, exps = [], onClose, reload, onDelete
         <div><div className="k">Sa part des frais</div><div className="v">{eur(s.fraisPart)}</div></div>
       </div>
 
+      <MessageBox inv={inv} reload={reload} />
+
       <h3 style={{ margin: '22px 0 10px', fontSize: 17 }}>Informations</h3>
       <form onSubmit={(e) => { e.preventDefault(); run(async () => {
         const body = { id: inv.id, full_name: f.full_name, share_pct: Number(f.share_pct) };
@@ -580,5 +582,27 @@ function MyAccount({ acc, byId, onOpen }) {
         </p>
       </div>
     </>
+  );
+}
+
+function MessageBox({ inv, reload }) {
+  const [msg, setMsg] = useState(inv.partner_message || '');
+  const [ok, setOk] = useState(false);
+  const { busy, err, run } = useBusy();
+  const first = (inv.full_name || '').split(' ')[0] || 'ton partenaire';
+  const save = (text) => run(async () => { await api.updateInvestor({ id: inv.id, partner_message: text }); await reload(); setOk(true); });
+  return (
+    <div style={{ marginTop: 22, padding: 18, borderRadius: 18, background: '#f5f5f7' }}>
+      <b style={{ fontSize: 16 }}>Message pour {first}</b>
+      <p className="m" style={{ color: 'var(--muted)', fontSize: 13, margin: '4px 0 10px' }}>Il le voit en haut de son espace dès qu'il se connecte.</p>
+      <textarea value={msg} onChange={(e) => { setOk(false); setMsg(e.target.value); }} placeholder="Ex. Ton hoodie est en vente depuis lundi, j'ai déjà 2 demandes. Je te tiens au courant 🔥" style={{ minHeight: 90 }} />
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+        <button className="btn sm" disabled={busy} onClick={() => save(msg.trim())}>{busy ? '…' : 'Publier le message'}</button>
+        {inv.partner_message && <button className="btn ghost sm" disabled={busy} onClick={() => { setMsg(''); save(''); }}>Effacer</button>}
+        {ok && <span className="pos" style={{ fontWeight: 600, fontSize: 14 }}>Publié ✓</span>}
+        {inv.partner_message_at && !ok && <span className="m" style={{ color: 'var(--muted)', fontSize: 12.5 }}>Dernière mise à jour : {new Date(inv.partner_message_at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}</span>}
+      </div>
+      {err && <div className="err">{err}</div>}
+    </div>
   );
 }

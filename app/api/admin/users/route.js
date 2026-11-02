@@ -30,7 +30,7 @@ export async function POST(req) {
 /** Modifie un partenaire : nom, part, email, mot de passe. */
 export async function PATCH(req) {
   const g = await guard(req); if (g.error) return g.error;
-  const { id, email, password, full_name, share_pct } = await req.json();
+  const { id, email, password, full_name, share_pct, partner_message } = await req.json();
   if (!id) return Response.json({ error: 'id manquant' }, { status: 400 });
   const authUpdate = {};
   if (email) authUpdate.email = email;
@@ -45,6 +45,7 @@ export async function PATCH(req) {
   const row = {};
   if (full_name !== undefined) row.full_name = full_name;
   if (share_pct !== undefined) row.share_pct = Number(share_pct);
+  if (partner_message !== undefined) { row.partner_message = partner_message || null; row.partner_message_at = partner_message ? new Date().toISOString() : null; }
   if (email) row.email = email;
   if (Object.keys(row).length) {
     const { error } = await g.admin.from('profiles').update(row).eq('id', id);

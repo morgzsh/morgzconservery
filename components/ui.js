@@ -53,8 +53,8 @@ export function Badge({ status }) {
   return <span className={'badge ' + s.tone}>{s.label}</span>;
 }
 
-export function PieceCard({ p, share, onClick, owner, mine }) {
-  const nb = pieceNumbers(p, share);
+export function PieceCard({ p, share, onClick, owner, mine, nb: nbo }) {
+  const nb = nbo || pieceNumbers(p, share);
   const tm = timing(p);
   return (
     <button className="card" onClick={onClick}>
@@ -75,7 +75,7 @@ export function PieceCard({ p, share, onClick, owner, mine }) {
             <div style={{ fontWeight: 700 }}>{eur(nb.sold ? p.sale_price : p.target_price)}</div>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div className="m">{mine ? 'Ta part' : owner ? 'Part partenaire' : 'Ta part'}</div>
+            <div className="m">{mine ? 'Ta part' : owner ? (nbo?.parts ? 'Parts partenaires' : 'Part partenaire') : 'Ta part'}</div>
             <div className={'big ' + ((mine ? nb.morgzPart : nb.investorPart) >= 0 ? 'pos' : 'neg')}>{eur(mine ? nb.morgzPart : nb.investorPart, true)}</div>
           </div>
         </div>
@@ -103,8 +103,8 @@ export function Modal({ onClose, children }) {
   );
 }
 
-export function PieceDetail({ p, share, onClose, actions, mine, owner }) {
-  const nb = pieceNumbers(p, share);
+export function PieceDetail({ p, share, onClose, actions, mine, owner, nb: nbo, partners }) {
+  const nb = nbo || pieceNumbers(p, share);
   const tm = timing(p);
   const sh = Number(share) || 60;
   return (
@@ -118,16 +118,20 @@ export function PieceDetail({ p, share, onClose, actions, mine, owner }) {
         <div><div className="k">Frais</div><div className="v">{eur(Number(p.fees || 0) + Number(p.extra_fees || 0))}</div></div>
         <div><div className="k">{nb.sold ? 'Prix de vente' : 'Prix visé'}</div><div className="v">{eur(nb.sold ? p.sale_price : p.target_price)}</div></div>
         <div><div className="k">{nb.sold ? 'Marge réelle' : 'Marge visée'}</div><div className="v">{eur(nb.sold ? nb.marginReal : nb.marginTarget)}</div></div>
-        {mine
+        {partners ? <>
+          {partners.map((x, i) => <div key={i}><div className="k">{x.name} · mise {eur(x.nb.mise)} · {x.share} %</div><div className={'v ' + (x.nb.investorPart >= 0 ? 'pos' : 'neg')}>{eur(x.nb.investorPart, true)}</div><div className="m" style={{ color: 'var(--muted)', fontSize: 12 }}>récupère {eur(nb.sold ? x.nb.retour : x.nb.retourTarget)}{nb.sold ? '' : ' (visé)'}</div></div>)}
+          <div><div className="k">Ta part Morgz</div><div className={'v ' + (nb.morgzPart >= 0 ? 'pos' : 'neg')}>{eur(nb.morgzPart, true)}</div><div className="m" style={{ color: 'var(--muted)', fontSize: 12 }}>ta mise {eur(nb.morgzMise)}</div></div>
+        </> : mine
           ? <div><div className="k">Ta part (100 %)</div><div className={'v ' + (nb.morgzPart >= 0 ? 'pos' : 'neg')}>{eur(nb.morgzPart, true)}</div></div>
           : <div><div className="k">{owner ? `Part de ${owner} (${nb.forced ? 'fixée' : sh + ' %'})` : `Ta part (${nb.forced ? 'fixée' : sh + ' %'})`}</div><div className={'v ' + (nb.investorPart >= 0 ? 'pos' : 'neg')}>{eur(nb.investorPart, true)}</div></div>}
-        {nb.coFi && !mine ? <>
+        {nb.coFi && !mine && !partners ? <>
           <div><div className="k">{owner ? `Mise de ${owner}` : 'Ta mise'}</div><div className="v">{eur(nb.mise)} <span className="m" style={{ fontSize: 12, color: 'var(--muted)' }}>sur {eur(nb.cost)}</span></div></div>
           <div><div className="k">{owner ? 'Il récupère' : 'Tu récupères'}{nb.sold ? '' : ' (visé)'}</div><div className="v pos">{eur(nb.sold ? nb.retour : nb.retourTarget)}</div></div>
         </> : null}
-        <div><div className="k">Rendement</div><div className="v">{(mine ? (nb.cost > 0 ? nb.morgzPart / nb.cost * 100 : 0) : nb.roiPct).toFixed(0)} %</div></div>
+        {!partners && <div><div className="k">Rendement</div><div className="v">{(mine ? (nb.cost > 0 ? nb.morgzPart / nb.cost * 100 : 0) : nb.roiPct).toFixed(0)} %</div></div>}
       </div>
-      {mine ? <div className="m" style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 10 }}>Pièce pour Morgz · 100 % de la marge pour toi</div> : <>
+      {partners ? <div className="m" style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 10 }}>Pièce achetée à 2 partenaires · chacun touche sa part au prorata de sa mise</div> : p.co_partner_id ? <div className="m" style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 10 }}>Pièce partagée avec un autre partenaire · ta part est calculée sur ta mise</div> : null}
+      {partners ? null : mine ? <div className="m" style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 10 }}>Pièce pour Morgz · 100 % de la marge pour toi</div> : <>
         <div className="split"><i style={{ width: sh + '%' }} /><u style={{ width: 100 - sh + '%' }} /></div>
         <div className="row m" style={{ color: 'var(--muted)', fontSize: 12.5 }}><span>{owner || 'Toi'} · {sh} %</span><span>Morgz · {100 - sh} %</span></div>
       </>}

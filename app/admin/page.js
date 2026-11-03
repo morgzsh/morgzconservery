@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, DEMO } from '@/lib/data';
-import { STATUS, EXPENSE_TYPES, EXPENSE_STATUS, eur, investorSummary, pieceNumbers, withExpenses, morgzSummary, partnerPortion } from '@/lib/calc';
+import { STATUS, EXPENSE_TYPES, EXPENSE_STATUS, eur, investorSummary, pieceNumbers, withExpenses, morgzSummary, partnerPortion, hasTwo, isPartnerOf, pieceFor, morgzNumbers } from '@/lib/calc';
 import AccountChart from '@/components/AccountChart';
 import { TopBar, Stat, PieceCard, PieceDetail, Modal, Footer, Badge, ExpenseList, ExpenseRule, useBusy } from '@/components/ui';
 
@@ -26,6 +26,8 @@ export default function Admin() {
   const [editMv, setEditMv] = useState(null);
   const [exps, setExps] = useState([]);
   const [editEx, setEditEx] = useState(null);
+  const [props, setProps] = useState([]);
+  const [editProp, setEditProp] = useState(null);
 
   const load = useCallback(async () => {
     setProfiles(await api.profiles());
@@ -33,6 +35,7 @@ export default function Admin() {
     setExps(ex);
     setPieces(withExpenses(await api.pieces(), ex));
     setMvts(await api.movements());
+    setProps(await api.proposals());
   }, []);
 
   useEffect(() => {
@@ -54,17 +57,17 @@ export default function Admin() {
   const active = pieces.filter((p) => p.status === 'achetee' || p.status === 'en_vente');
   const activeInv = active.filter((p) => p.investor_id);
   const activeMine = active.filter((p) => !p.investor_id);
-  const engage = activeInv.reduce((a, p) => a + pieceNumbers(p, shareOf(p.investor_id)).mise, 0);
-  const engageMine = activeMine.reduce((a, p) => a + pieceNumbers(p, 0).cost, 0) + activeInv.reduce((a, p) => a + pieceNumbers(p, shareOf(p.investor_id)).morgzMise, 0);
+  const engage = activeInv.reduce((a, p) => a + morgzNumbers(p, shareOf).mise, 0);
+  const engageMine = activeMine.reduce((a, p) => a + pieceNumbers(p, 0).cost, 0) + activeInv.reduce((a, p) => a + morgzNumbers(p, shareOf).morgzMise, 0);
   const myMv = mvts.filter((m) => !m.investor_id);
   const mySum = (t) => myMv.filter((m) => m.type === t).reduce((a, m) => a + Number(m.amount || 0), 0);
   const sold = pieces.filter((p) => p.status === 'vendue');
   const shareP = (p) => (p.investor_id ? shareOf(p.investor_id) : 0);
-  const morgzReal = sold.reduce((a, p) => a + pieceNumbers(p, shareP(p)).morgzPart, 0);
+  const morgzReal = sold.reduce((a, p) => a + morgzNumbers(p, shareOf).morgzPart, 0);
   const generalPaid = exps.filter((e) => !e.piece_id && e.status === 'regle');
   const generalAll = exps.filter((e) => !e.piece_id && e.investor_id).reduce((a, e) => a + Number(e.amount || 0), 0);
   const shareE = (e) => (e.investor_id ? shareOf(e.investor_id) : 0);
-  const invReal = sold.reduce((a, p) => a + pieceNumbers(p, shareP(p)).investorPart, 0)
+  const invReal = sold.reduce((a, p) => a + morgzNumbers(p, shareOf).investorPart, 0)
     - generalPaid.reduce((a, e) => a + partnerPortion(e, shareE(e)), 0);
   const morgzNet = morgzReal - generalPaid.reduce((a, e) => a + Number(e.amount) - partnerPortion(e, shareE(e)), 0);
   const acc = morgzSummary(pieces, exps, shareOf);
@@ -72,8 +75,10 @@ export default function Admin() {
   const myCapital = mySum('apport') - mySum('retrait') - mySum('versement_gains') + acc.solde;
   const pieceName = (id) => { const p = pieces.find((x) => x.id === id); return p ? (p.brand ? p.brand + ' — ' : '') + p.title : 'Pièce supprimée'; };
   const exOf = (id) => exps.filter((e) => e.investor_id === id);
+  const piecesOf = (id) => pieces.filter((p) => isPartnerOf(p, id)).map((p) => pieceFor(p, id));
+  const ownerLabel = (p) => (p.investor_id ? 'Pour ' + [p.investor_id, p.investor2_id].filter(Boolean).map((id) => (byId[id]?.full_name || 'partenaire').split(' ')[0]).join(' + ') : 'Pour Morgz');
   const shown = pieces.filter((p) => (filter === 'all' || p.status === filter)
-    && (ownerF === 'all' || (ownerF === 'morgz' ? !p.investor_id : p.investor_id === ownerF)));
+    && (ownerF === 'all' || (ownerF === 'morgz' ? !p.investor_id : isPartnerOf(p, ownerF))));
 
   return (
     <>
@@ -94,12 +99,13 @@ export default function Admin() {
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <div className="tabs">
-            {[['pieces', 'Pièces'], ['investors', 'Partenaires'], ['mvts', 'Mouvements'], ['frais', 'Frais'], ['compte', 'Mes comptes']].map(([k, l]) => (
+            {[['pieces', 'Pièces'], ['props', 'Propositions' + (props.filter((x) => x.status === 'accepted').length ? ' · ' + props.filter((x) => x.status === 'accepted').length : '')], ['investors', 'Partenaires'], ['mvts', 'Mouvements'], ['frais', 'Frais'], ['compte', 'Mes comptes']].map(([k, l]) => (
               <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
             ))}
           </div>
           <div style={{ marginBottom: 22 }}>
             {tab === 'pieces' && <button className="btn" onClick={() => setEdit({})}>+ Nouvelle pièce</button>}
+            {tab === 'props' && <button className="btn" onClick={() => setEditProp({})}>+ Proposer une pièce</button>}
             {tab === 'investors' && <button className="btn" onClick={() => setNewInv(true)}>+ Nouveau partenaire</button>}
             {tab === 'frais' && <button className="btn" onClick={() => setEditEx({})}>+ Nouveau frais</button>}
             {tab === 'compte' && <button className="btn" onClick={() => setEditEx({ investor_id: '' })}>+ Frais perso</button>}
@@ -121,17 +127,22 @@ export default function Admin() {
             </div>
             {shown.length === 0 ? <div className="empty">Aucune pièce. Ajoute ta première pièce.</div> : (
               <div className="grid">{shown.map((p) => (
-                <PieceCard key={p.id} p={p} share={shareP(p)} mine={!p.investor_id} owner={p.investor_id ? 'Pour ' + (byId[p.investor_id]?.full_name || 'partenaire') : 'Pour Morgz'} onClick={() => setView(p)} />
+                <PieceCard key={p.id} p={p} share={shareP(p)} nb={hasTwo(p) ? morgzNumbers(p, shareOf) : undefined} mine={!p.investor_id} owner={ownerLabel(p)} onClick={() => setView(p)} />
               ))}</div>
             )}
           </>
         )}
 
+        {tab === 'props' && <Proposals items={props} byId={byId} shareOf={shareOf}
+          onEdit={(x) => setEditProp(x)}
+          onDelete={async (x) => { if (confirm('Supprimer cette proposition ?')) { await api.deleteProposal(x.id); load(); } }}
+          onCreate={(x) => setEdit({ title: x.title, brand: x.brand || '', size: x.size || '', photos: x.photos || [], purchase_price: x.purchase_price, target_price: x.target_price, investor_id: x.investor_id, investor_contribution: x.contribution ?? '', notes: x.note || '', status: 'achetee', _fromProp: x.id })} />}
+
         {tab === 'investors' && (investors.length === 0 ? <div className="empty">Aucun partenaire.</div> : (
           <div className="scroll"><table className="tbl">
             <thead><tr><th>Partenaire</th><th>Part</th><th className="r">Capital</th><th className="r">Engagé</th><th className="r">Gains réalisés</th><th className="r">Valeur</th><th></th></tr></thead>
             <tbody>{investors.map((i) => {
-              const s = investorSummary(pieces.filter((p) => p.investor_id === i.id), mvts.filter((m) => m.investor_id === i.id), i.share_pct, exOf(i.id));
+              const s = investorSummary(piecesOf(i.id), mvts.filter((m) => m.investor_id === i.id), i.share_pct, exOf(i.id));
               return (
                 <tr key={i.id}>
                   <td style={{ cursor: 'pointer' }} onClick={() => setEditInv(i)}><b>{i.full_name || '—'}</b><div className="m" style={{ color: 'var(--muted)' }}>{i.email}</div></td>
@@ -174,17 +185,19 @@ export default function Admin() {
       </main>
 
       {view && (
-        <PieceDetail p={view} share={shareP(view)} mine={!view.investor_id} owner={view.investor_id ? byId[view.investor_id]?.full_name : 'Morgz (moi)'} onClose={() => setView(null)} actions={<>
+        <PieceDetail p={view} share={shareP(view)} mine={!view.investor_id} owner={view.investor_id ? byId[view.investor_id]?.full_name : 'Morgz (moi)'} nb={hasTwo(view) ? morgzNumbers(view, shareOf) : undefined} partners={hasTwo(view) ? morgzNumbers(view, shareOf).parts.map((x) => ({ name: byId[x.id]?.full_name || 'Partenaire', share: shareOf(x.id), nb: x.nb })) : undefined} onClose={() => setView(null)} actions={<>
           <button className="btn" onClick={() => { setEdit(view); setView(null); }}>Modifier</button>
+          <button className="btn ghost" onClick={() => { setEdit(duplicate(view)); setView(null); }}>Dupliquer</button>
           <button className="btn ghost" onClick={() => { setEditEx({ investor_id: view.investor_id || '', piece_id: view.id }); setView(null); }}>+ Frais</button>
           {view.status !== 'vendue' && <button className="btn ghost" onClick={() => { setEdit({ ...view, status: 'vendue', sale_price: view.target_price, sold_at: today() }); setView(null); }}>Marquer vendue</button>}
           <button className="btn danger" onClick={async () => { if (confirm('Supprimer cette pièce ?')) { await api.deletePiece(view.id); setView(null); load(); } }}>Supprimer</button>
         </>} />
       )}
       {edit && <PieceForm initial={edit} investors={investors} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(); }} />}
+      {editProp && <ProposalForm initial={editProp} investors={investors} onClose={() => setEditProp(null)} onSaved={() => { setEditProp(null); load(); }} />}
       {newInv && <InvestorForm onClose={() => setNewInv(false)} onSaved={() => { setNewInv(false); load(); }} />}
       {editInv && byId[editInv.id] && (
-        <PartnerEditor inv={byId[editInv.id]} pieces={pieces.filter((p) => p.investor_id === editInv.id)} mvts={mvts.filter((m) => m.investor_id === editInv.id)} exps={exOf(editInv.id)}
+        <PartnerEditor inv={byId[editInv.id]} pieces={piecesOf(editInv.id)} mvts={mvts.filter((m) => m.investor_id === editInv.id)} exps={exOf(editInv.id)}
           onClose={() => setEditInv(null)} reload={load} onDeleted={() => { setEditInv(null); load(); }} />
       )}
       {editEx && <ExpenseForm initial={editEx} investors={investors} pieces={pieces} onClose={() => setEditEx(null)} onSaved={() => { setEditEx(null); load(); }} />}
@@ -198,6 +211,12 @@ function Field({ label, full, children }) {
   return <div className={full ? 'full' : ''}><label>{label}</label>{children}</div>;
 }
 
+/** Copie d'une pièce, prête à être modifiée puis enregistrée comme nouvelle pièce. */
+function duplicate(p) {
+  const { id, created_at, linked_expenses, extra_fees, co_partner_id, ...rest } = p;
+  return { ...rest, status: p.status === 'vendue' ? 'achetee' : p.status, sale_price: '', sold_at: '', purchased_at: today(), proofs: [], _dup: true };
+}
+
 function PieceForm({ initial, investors, onClose, onSaved }) {
   const [p, setP] = useState({
     title: '', brand: '', size: '', condition: 'Neuf', status: 'achetee', purchase_price: '', target_price: '', sale_price: '',
@@ -207,8 +226,11 @@ function PieceForm({ initial, investors, onClose, onSaved }) {
   const { busy, err, run } = useBusy();
   const set = (k) => (e) => setP({ ...p, [k]: e.target.value });
   const num = (k) => (e) => setP({ ...p, [k]: e.target.value === '' ? '' : Number(e.target.value) });
-  const share = p.investor_id ? (investors.find((i) => i.id === p.investor_id)?.share_pct ?? 60) : 0;
-  const nb = pieceNumbers({ ...p }, share);
+  const shareOfI = (id) => investors.find((i) => i.id === id)?.share_pct ?? 60;
+  const share = p.investor_id ? shareOfI(p.investor_id) : 0;
+  const two = !!(p.investor_id && p.investor2_id);
+  const nb = two ? morgzNumbers({ ...p }, shareOfI) : pieceNumbers({ ...p }, share);
+  const [showTwo, setShowTwo] = useState(!!initial.investor2_id);
 
   const upload = (kind) => async (e) => {
     const files = [...e.target.files];
@@ -223,7 +245,8 @@ function PieceForm({ initial, investors, onClose, onSaved }) {
 
   return (
     <Modal onClose={onClose}>
-      <h2>{initial.id ? 'Modifier la pièce' : 'Nouvelle pièce'}</h2>
+      <h2>{initial.id ? 'Modifier la pièce' : initial._dup ? 'Copie de la pièce' : 'Nouvelle pièce'}</h2>
+      {initial._dup && <p className="m" style={{ color: 'var(--muted)', fontSize: 13, marginTop: -6 }}>Tout est recopié sauf la vente et les preuves. Change ce qu'il faut (taille, couleur, partenaire…) puis enregistre.</p>}
       <form onSubmit={(e) => { e.preventDefault(); run(async () => {
         const setv = (v) => v !== '' && v !== null && v !== undefined;
         const row = { ...p, investor_amount: p.investor_id && setv(p.investor_amount) ? Number(p.investor_amount) : null, investor_contribution: p.investor_id && setv(p.investor_contribution) ? Number(p.investor_contribution) : null, purchase_price: Number(p.purchase_price) || 0, target_price: Number(p.target_price) || 0, fees: Number(p.fees) || 0, target_days: Number(p.target_days) || 30, sale_price: p.sale_price === '' ? null : Number(p.sale_price) };
@@ -231,7 +254,15 @@ function PieceForm({ initial, investors, onClose, onSaved }) {
         // N'envoie la colonne que si elle sert (compatibilité avant la mise à jour de la base).
         if (row.investor_amount === null && (initial.investor_amount === undefined || initial.investor_amount === null)) delete row.investor_amount;
         if (row.investor_contribution === null && (initial.investor_contribution === undefined || initial.investor_contribution === null)) delete row.investor_contribution;
-        await api.savePiece(row); onSaved();
+        if (!row.investor_id || !showTwo || !row.investor2_id) { row.investor2_id = null; row.investor2_contribution = null; }
+        if (row.investor2_id && row.investor2_id === row.investor_id) throw new Error('Choisis 2 partenaires différents.');
+        row.investor2_contribution = row.investor2_id && setv(p.investor2_contribution) ? Number(p.investor2_contribution) : null;
+        if (row.investor2_id) delete row.investor_amount; // part forcée à la main : seulement avec 1 partenaire
+        for (const k of ['investor2_id', 'investor2_contribution']) if (row[k] === null && (initial[k] === undefined || initial[k] === null)) delete row[k];
+        const fromProp = row._fromProp; delete row._dup; delete row._fromProp;
+        await api.savePiece(row);
+        if (fromProp) await api.deleteProposal(fromProp).catch(() => {}); // la proposition devient une vraie pièce
+        onSaved();
       }); }}>
         <div className="fgrid">
           <Field label="Marque"><input className="in-f" value={p.brand} onChange={set('brand')} placeholder="Chrome Hearts" /></Field>
@@ -252,8 +283,19 @@ function PieceForm({ initial, investors, onClose, onSaved }) {
           <Field label="Frais (port, plateforme, authentif.)"><input className="in-f" type="number" step="0.01" min="0" value={p.fees} onChange={num('fees')} /></Field>
           <Field label="Délai visé (jours)"><input className="in-f" type="number" min="1" value={p.target_days} onChange={num('target_days')} /></Field>
           <Field label="Date d'achat"><input className="in-f" type="date" value={p.purchased_at || ''} onChange={set('purchased_at')} /></Field>
-          {p.investor_id ? <Field label="Mise du partenaire en € (vide = il finance tout)"><input className="in-f" type="number" step="0.01" min="0" value={p.investor_contribution ?? ''} onChange={num('investor_contribution')} placeholder={'ex. 500 sur ' + eur(nb.cost)} /></Field> : null}
-          {p.investor_id ? <Field label="Part du partenaire en € (vide = calcul auto)"><input className="in-f" type="number" step="0.01" value={p.investor_amount ?? ''} onChange={num('investor_amount')} placeholder={'auto : ' + Math.round(pieceNumbers({ ...p, investor_amount: null }, share).investorPart * 100) / 100 + ' €'} /></Field> : <div />}
+          {p.investor_id ? <Field label={two ? `Mise de ${(investors.find((i) => i.id === p.investor_id)?.full_name || '1er partenaire').split(' ')[0]} (€)` : 'Mise du partenaire en € (vide = il finance tout)'}><input className="in-f" type="number" step="0.01" min="0" value={p.investor_contribution ?? ''} onChange={num('investor_contribution')} placeholder={two ? 'vide = moitié : ' + eur(nb.cost / 2) : 'ex. 500 sur ' + eur(nb.cost)} /></Field> : null}
+          {p.investor_id && !showTwo ? <div style={{ alignSelf: 'end' }}><button type="button" className="btn ghost sm" onClick={() => setShowTwo(true)}>+ Ajouter un 2ᵉ partenaire</button></div> : null}
+          {p.investor_id && showTwo ? <>
+            <Field label="2ᵉ partenaire">
+              <select value={p.investor2_id || ''} onChange={set('investor2_id')}>
+                <option value="">Choisir…</option>
+                {investors.filter((i) => i.id !== p.investor_id).map((i) => <option key={i.id} value={i.id}>{i.full_name || i.email}</option>)}
+              </select>
+            </Field>
+            <Field label="Mise du 2ᵉ partenaire (€)"><input className="in-f" type="number" step="0.01" min="0" value={p.investor2_contribution ?? ''} onChange={num('investor2_contribution')} placeholder={'vide = moitié : ' + eur(nb.cost / 2)} /></Field>
+            <div style={{ alignSelf: 'end' }}><button type="button" className="btn ghost sm" onClick={() => { setShowTwo(false); setP({ ...p, investor2_id: '', investor2_contribution: '' }); }}>Retirer le 2ᵉ partenaire</button></div>
+          </> : null}
+          {p.investor_id && !two ? <Field label="Part du partenaire en € (vide = calcul auto)"><input className="in-f" type="number" step="0.01" value={p.investor_amount ?? ''} onChange={num('investor_amount')} placeholder={'auto : ' + Math.round(pieceNumbers({ ...p, investor_amount: null }, share).investorPart * 100) / 100 + ' €'} /></Field> : null}
           {p.status === 'vendue' ? (
             <>
               <Field label="Prix de vente réel (€)"><input className="in-f" type="number" step="0.01" min="0" required value={p.sale_price ?? ''} onChange={num('sale_price')} /></Field>
@@ -272,11 +314,18 @@ function PieceForm({ initial, investors, onClose, onSaved }) {
         </div>
         <div className="kv">
           <div><div className="k">{p.status === 'vendue' ? 'Marge réelle' : 'Marge visée'}</div><div className="v">{eur(p.status === 'vendue' ? nb.marginReal ?? 0 : nb.marginTarget)}</div></div>
-          {p.investor_id ? <div><div className="k">Part partenaire ({nb.forced ? 'fixée à la main' : nb.coFi ? `${Math.round(nb.ratio * 100)} % de la pièce × ${share} %` : share + ' %'})</div><div className="v pos">{eur(nb.investorPart, true)}</div></div> : <div><div className="k">Pour</div><div className="v">Morgz</div></div>}
+          {two ? <div><div className="k">Parts partenaires (2)</div><div className="v pos">{eur(nb.investorPart, true)}</div></div> : p.investor_id ? <div><div className="k">Part partenaire ({nb.forced ? 'fixée à la main' : nb.coFi ? `${Math.round(nb.ratio * 100)} % de la pièce × ${share} %` : share + ' %'})</div><div className="v pos">{eur(nb.investorPart, true)}</div></div> : <div><div className="k">Pour</div><div className="v">Morgz</div></div>}
           <div><div className="k">Ta part{nb.forced || nb.coFi ? '' : ` (${100 - share} %)`}</div><div className="v">{eur(nb.morgzPart, true)}</div></div>
         </div>
         {p.investor_id && nb.coFi && nb.mise > nb.cost ? <p className="m" style={{ color: 'var(--muted)', fontSize: 13, margin: '-4px 0 14px' }}>Sa mise dépasse le prix de la pièce : c'est toi qui décides, c'est bien enregistré. Vérifie juste le prix d'achat si c'est une erreur de frappe.</p> : null}
-        {p.investor_id && nb.coFi ? (
+        {two ? (
+          <div className="kv" style={{ marginTop: -6 }}>
+            {nb.parts.map((x) => { const nm = (investors.find((i) => i.id === x.id)?.full_name || 'Partenaire').split(' ')[0]; return (
+              <div key={x.id}><div className="k">{nm} · mise {eur(x.nb.mise)} · {shareOfI(x.id)} %</div><div className="v pos">{eur(x.nb.investorPart, true)}</div><div className="m" style={{ color: 'var(--muted)', fontSize: 12 }}>récupère {eur(x.nb.retour)}</div></div>
+            ); })}
+            <div><div className="k">Prix pièce · ta mise</div><div className="v">{eur(nb.cost)} · {eur(nb.morgzMise)}</div></div>
+          </div>
+        ) : p.investor_id && nb.coFi ? (
           <div className="kv" style={{ marginTop: -6 }}>
             <div><div className="k">Prix de la pièce</div><div className="v">{eur(nb.cost)}</div></div>
             <div><div className="k">Mise partenaire · ta mise</div><div className="v">{eur(nb.mise)} · {eur(nb.morgzMise)}</div></div>
@@ -481,7 +530,7 @@ function ExpenseForm({ initial, investors, pieces, onClose, onSaved }) {
   const [custom, setCustom] = useState(hasCustom ? initial.investor_amount : '');
   const { busy, err, run } = useBusy();
   const set = (k) => (ev) => setE({ ...e, [k]: ev.target.value });
-  const own = pieces.filter((p) => (p.investor_id || '') === (e.investor_id || ''));
+  const own = pieces.filter((p) => (e.investor_id ? isPartnerOf(p, e.investor_id) : !p.investor_id));
   const piece = pieces.find((p) => p.id === e.piece_id);
   const already = piece ? (piece.linked_expenses || []).filter((x) => x.id !== e.id).reduce((a, x) => a + Number(x.amount || 0), 0) : 0;
   const cap = piece ? 0.1 * Number(piece.purchase_price || 0) : 0;
@@ -604,5 +653,90 @@ function MessageBox({ inv, reload }) {
       </div>
       {err && <div className="err">{err}</div>}
     </div>
+  );
+}
+
+
+const PROP_ST = { pending: ['En attente', ''], accepted: ['Partant', 'ok'], declined: ['Pas pour lui', 'late'] };
+
+/** Liste des propositions envoyées aux partenaires. */
+function Proposals({ items, byId, shareOf, onEdit, onDelete, onCreate }) {
+  if (items.length === 0) return <div className="empty">Aucune proposition. Propose une pièce en sourcing à un ou plusieurs partenaires : ils la verront en se connectant et pourront dire s'ils sont partants.</div>;
+  return (
+    <div className="grid">{items.map((x) => {
+      const share = shareOf(x.investor_id);
+      const nb = pieceNumbers({ purchase_price: x.purchase_price, target_price: x.target_price, fees: 0, status: 'achetee', investor_id: x.investor_id, investor_contribution: x.contribution }, share);
+      const [lbl, tone] = PROP_ST[x.status] || PROP_ST.pending;
+      return (
+        <div key={x.id} className="card" style={{ cursor: 'default' }}>
+          <div className="ph">
+            <span style={{ position: 'absolute', top: 12, left: 12 }}><span className={'badge ' + tone}>{lbl}</span></span>
+            {x.photos?.[0] ? <img src={x.photos[0]} alt="" /> : <span className="m">Photo à venir</span>}
+          </div>
+          <div className="bd">
+            <div className="t">{x.brand ? x.brand + ' — ' : ''}{x.title}</div>
+            <div className="m">{[x.size && 'Taille ' + x.size, 'Pour ' + (byId[x.investor_id]?.full_name || 'partenaire')].filter(Boolean).join(' · ')}</div>
+            <div className="row" style={{ marginTop: 12 }}>
+              <div><div className="m">Achat</div><div style={{ fontWeight: 700 }}>{eur(x.purchase_price)}</div></div>
+              <div><div className="m">Mise demandée</div><div style={{ fontWeight: 700 }}>{eur(nb.mise)}</div></div>
+              <div style={{ textAlign: 'right' }}><div className="m">Sa part visée</div><div className="big pos">{eur(nb.investorPartTarget, true)}</div></div>
+            </div>
+            {x.responded_at && <div className="m" style={{ marginTop: 8, color: 'var(--muted)', fontSize: 12 }}>Réponse le {new Date(x.responded_at).toLocaleDateString('fr-FR')}</div>}
+            <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+              {x.status === 'accepted' && <button className="btn sm" onClick={() => onCreate(x)}>Créer la pièce</button>}
+              <button className="btn ghost sm" onClick={() => onEdit(x)}>Modifier</button>
+              <button className="btn danger sm" onClick={() => onDelete(x)}>Suppr.</button>
+            </div>
+          </div>
+        </div>
+      );
+    })}</div>
+  );
+}
+
+/** Proposer une pièce en sourcing à un ou plusieurs partenaires. */
+function ProposalForm({ initial, investors, onClose, onSaved }) {
+  const [x, setX] = useState({ title: '', brand: '', size: '', photos: [], purchase_price: '', target_price: '', contribution: '', note: '', ...initial });
+  const [to, setTo] = useState(initial.investor_id ? [initial.investor_id] : []);
+  const { busy, err, run } = useBusy();
+  const set = (k) => (e) => setX({ ...x, [k]: e.target.value });
+  const cost = Number(x.purchase_price || 0);
+  const toggle = (id) => setTo((t) => (t.includes(id) ? t.filter((y) => y !== id) : [...t, id]));
+  return (
+    <Modal onClose={onClose}>
+      <h2>{initial.id ? 'Modifier la proposition' : 'Proposer une pièce'}</h2>
+      <p className="m" style={{ color: 'var(--muted)', fontSize: 13, marginTop: -6 }}>Le partenaire la voit en haut de son espace et répond « Je suis partant » ou « Pas pour moi ».</p>
+      <form onSubmit={(e) => { e.preventDefault(); run(async () => {
+        if (!x.title) throw new Error('Mets au moins un nom de pièce.');
+        if (!initial.id && to.length === 0) throw new Error('Choisis au moins un partenaire.');
+        const base = { title: x.title, brand: x.brand || null, size: x.size || null, photos: x.photos || [], purchase_price: Number(x.purchase_price || 0), target_price: Number(x.target_price || 0), contribution: x.contribution === '' || x.contribution == null ? null : Number(x.contribution), note: x.note || null };
+        const rows = initial.id ? [{ id: initial.id, ...base }] : to.map((id) => ({ ...base, investor_id: id }));
+        await api.saveProposals(rows); onSaved();
+      }); }}>
+        <div className="fgrid">
+          <Field label="Marque"><input value={x.brand || ''} onChange={set('brand')} placeholder="ex. Chanel" /></Field>
+          <Field label="Pièce"><input value={x.title} onChange={set('title')} placeholder="ex. Sac 22 noir" /></Field>
+          <Field label="Taille"><input value={x.size || ''} onChange={set('size')} /></Field>
+          <Field label="Prix d'achat (€)"><input type="number" step="0.01" min="0" value={x.purchase_price} onChange={set('purchase_price')} /></Field>
+          <Field label="Revente visée (€)"><input type="number" step="0.01" min="0" value={x.target_price} onChange={set('target_price')} /></Field>
+          <Field label="Mise demandée (€)"><input type="number" step="0.01" min="0" value={x.contribution ?? ''} onChange={set('contribution')} placeholder={cost ? 'vide = tout : ' + eur(cost) : 'vide = il finance tout'} /></Field>
+          <Field full label="Message pour le partenaire"><textarea rows={2} value={x.note || ''} onChange={set('note')} placeholder="ex. Dispo en boutique jusqu'à samedi, revente rapide." /></Field>
+          <Field full label="Photos">
+            <input type="file" accept="image/*" multiple onChange={(e) => { const files = [...e.target.files]; run(async () => { const urls = []; for (const f of files) urls.push(await api.upload(f)); setX((y) => ({ ...y, photos: [...(y.photos || []), ...urls] })); }); e.target.value = ''; }} />
+            {x.photos?.length > 0 && <div className="gal" style={{ marginTop: 10 }}>{x.photos.map((u, i) => <a key={i} onClick={() => setX({ ...x, photos: x.photos.filter((_, j) => j !== i) })} title="Retirer"><img src={u} alt="" /></a>)}</div>}
+          </Field>
+          {!initial.id && (
+            <Field full label="Envoyer à">
+              <div className="chips">{investors.map((i) => <button type="button" key={i.id} className={'btn sm ' + (to.includes(i.id) ? '' : 'ghost')} onClick={() => toggle(i.id)}>{i.full_name || i.email}</button>)}</div>
+            </Field>
+          )}
+        </div>
+        {err && <div className="err">{err}</div>}
+        <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+          <button className="btn" disabled={busy}>{initial.id ? 'Enregistrer' : `Envoyer${to.length > 1 ? ' à ' + to.length + ' partenaires' : ''}`}</button>
+          <button type="button" className="btn ghost" onClick={onClose}>Annuler</button>
+        </div>
+      </form>
+    </Modal>
   );
 }

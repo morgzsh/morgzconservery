@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, DEMO } from '@/lib/data';
-import { eur, investorSummary, withExpenses } from '@/lib/calc';
+import { eur, investorSummary, withExpenses, pieceFor, pieceNumbers } from '@/lib/calc';
 import { TopBar, Stat, PieceCard, PieceDetail, Modal, Footer, ExpenseList, ExpenseRule, useBusy } from '@/components/ui';
 
 const MV = { apport: 'Apport', retrait: 'Retrait de capital', versement_gains: 'Gains versés' };
@@ -15,6 +15,8 @@ export default function Espace() {
   const [exps, setExps] = useState([]);
   const [open, setOpen] = useState(null);
   const [pwd, setPwd] = useState(false);
+  const [props, setProps] = useState([]);
+  const [answering, setAnswering] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -25,8 +27,9 @@ export default function Espace() {
       setMe(m);
       const ex = await api.expenses(m.id);
       setExps(ex);
-      setPieces(withExpenses(await api.pieces(m.id), ex));
+      setPieces(withExpenses(await api.pieces(m.id), ex).map((p) => pieceFor(p, m.id)));
       setMvts(await api.movements(m.id));
+      setProps(await api.proposals(m.id));
     })();
   }, [r]);
 
@@ -59,6 +62,42 @@ export default function Espace() {
           <Stat k="Gains réalisés" v={eur(s.gainsRealises, true)} h={`${s.nbSold} pièce${s.nbSold > 1 ? 's' : ''} vendue${s.nbSold > 1 ? 's' : ''}`} />
           <Stat k="Gains visés en cours" v={eur(s.gainsPotentiels, true)} h={`${s.nbActive} pièce${s.nbActive > 1 ? 's' : ''} en cours · non garantis`} />
         </div>
+
+        {props.length > 0 && (
+          <>
+            <h2>Propositions pour toi</h2>
+            <p className="m" style={{ color: 'var(--muted)', marginTop: -8, marginBottom: 16 }}>Des pièces que Morgz peut sourcer. Dis-lui si tu es partant, il s'occupe du reste.</p>
+            <div style={{ display: 'grid', gap: 14, marginBottom: 34 }}>{props.map((x) => {
+              const nb = pieceNumbers({ purchase_price: x.purchase_price, target_price: x.target_price, fees: 0, status: 'achetee', investor_id: me.id, investor_contribution: x.contribution }, share);
+              const respond = async (ok) => { setAnswering(x.id); try { await api.respondProposal(x.id, ok); setProps(await api.proposals(me.id)); } catch (e) { alert(e.message || 'Erreur'); } setAnswering(null); };
+              return (
+                <div key={x.id} className="propcard">
+                  <div className="pimg">{x.photos?.[0] ? <img src={x.photos[0]} alt="" /> : <span className="m">Photo à venir</span>}</div>
+                  <div className="pb">
+                    <div className="t" style={{ fontWeight: 700, fontSize: 17 }}>{x.brand ? x.brand + ' — ' : ''}{x.title}</div>
+                    {x.size && <div className="m" style={{ color: 'var(--muted)' }}>Taille {x.size}</div>}
+                    <div className="kv" style={{ marginTop: 12 }}>
+                      <div><div className="k">Prix d'achat</div><div className="v">{eur(x.purchase_price)}</div></div>
+                      <div><div className="k">Revente visée</div><div className="v">{eur(x.target_price)}</div></div>
+                      <div><div className="k">Ta mise</div><div className="v">{eur(nb.mise)}</div></div>
+                      <div><div className="k">Ta part visée ({share} %)</div><div className="v pos">{eur(nb.investorPartTarget, true)}</div></div>
+                    </div>
+                    {x.note && <p style={{ marginTop: 10, color: 'var(--ink-2)' }}>{x.note}</p>}
+                    {x.status === 'pending' ? (
+                      <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+                        <button className="btn" disabled={answering === x.id} onClick={() => respond(true)}>Je suis partant</button>
+                        <button className="btn ghost" disabled={answering === x.id} onClick={() => respond(false)}>Pas pour moi</button>
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 14 }}><span className={'badge ' + (x.status === 'accepted' ? 'ok' : '')}>{x.status === 'accepted' ? 'Tu es partant · Morgz te recontacte' : 'Tu as passé ton tour'}</span></div>
+                    )}
+                    <div className="m" style={{ color: 'var(--muted)', fontSize: 12, marginTop: 10 }}>Montants visés : estimation, non garantie.</div>
+                  </div>
+                </div>
+              );
+            })}</div>
+          </>
+        )}
 
         <h2>Tes pièces</h2>
         {pieces.length === 0 ? (

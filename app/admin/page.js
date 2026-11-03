@@ -133,7 +133,14 @@ export default function Admin() {
           </>
         )}
 
-        {tab === 'props' && <Proposals items={props} byId={byId} shareOf={shareOf}
+        {tab === 'props' && <Proposals items={props} byId={byId} shareOf={shareOf} pieces={pieces}
+          onAssign={(x, pc) => {
+            const base = { ...pc, _fromProp: x.id };
+            delete base.linked_expenses; delete base.extra_fees;
+            if (!pc.investor_id) setEdit({ ...base, investor_id: x.investor_id, investor_contribution: x.contribution ?? '' });
+            else if (pc.investor_id === x.investor_id) setEdit({ ...base, investor_contribution: x.contribution ?? pc.investor_contribution ?? '' });
+            else setEdit({ ...base, investor2_id: x.investor_id, investor2_contribution: x.contribution ?? '' });
+          }}
           onEdit={(x) => setEditProp(x)}
           onDelete={async (x) => { if (confirm('Supprimer cette proposition ?')) { await api.deleteProposal(x.id); load(); } }}
           onCreate={(x) => setEdit({ title: x.title, brand: x.brand || '', size: x.size || '', photos: x.photos || [], purchase_price: x.purchase_price, target_price: x.target_price, investor_id: x.investor_id, investor_contribution: x.contribution ?? '', notes: x.note || '', status: 'achetee', _fromProp: x.id })} />}
@@ -188,6 +195,7 @@ export default function Admin() {
         <PieceDetail p={view} share={shareP(view)} mine={!view.investor_id} owner={view.investor_id ? byId[view.investor_id]?.full_name : 'Morgz (moi)'} nb={hasTwo(view) ? morgzNumbers(view, shareOf) : undefined} partners={hasTwo(view) ? morgzNumbers(view, shareOf).parts.map((x) => ({ name: byId[x.id]?.full_name || 'Partenaire', share: shareOf(x.id), nb: x.nb })) : undefined} onClose={() => setView(null)} actions={<>
           <button className="btn" onClick={() => { setEdit(view); setView(null); }}>Modifier</button>
           <button className="btn ghost" onClick={() => { setEdit(duplicate(view)); setView(null); }}>Dupliquer</button>
+          {view.status !== 'vendue' && !hasTwo(view) && <button className="btn ghost" onClick={() => { setEditProp({ piece_id: view.id, title: view.title, brand: view.brand || '', size: view.size || '', photos: view.photos || [], purchase_price: Number(view.purchase_price || 0) + Number(view.fees || 0), target_price: view.target_price, contribution: '', note: '' }); setView(null); }}>Proposer à un partenaire</button>}
           <button className="btn ghost" onClick={() => { setEditEx({ investor_id: view.investor_id || '', piece_id: view.id }); setView(null); }}>+ Frais</button>
           {view.status !== 'vendue' && <button className="btn ghost" onClick={() => { setEdit({ ...view, status: 'vendue', sale_price: view.target_price, sold_at: today() }); setView(null); }}>Marquer vendue</button>}
           <button className="btn danger" onClick={async () => { if (confirm('Supprimer cette pièce ?')) { await api.deletePiece(view.id); setView(null); load(); } }}>Supprimer</button>
@@ -660,13 +668,14 @@ function MessageBox({ inv, reload }) {
 const PROP_ST = { pending: ['En attente', ''], accepted: ['Partant', 'ok'], declined: ['Pas pour lui', 'late'] };
 
 /** Liste des propositions envoyées aux partenaires. */
-function Proposals({ items, byId, shareOf, onEdit, onDelete, onCreate }) {
+function Proposals({ items, byId, shareOf, pieces = [], onEdit, onDelete, onCreate, onAssign }) {
   if (items.length === 0) return <div className="empty">Aucune proposition. Propose une pièce en sourcing à un ou plusieurs partenaires : ils la verront en se connectant et pourront dire s'ils sont partants.</div>;
   return (
     <div className="grid">{items.map((x) => {
       const share = shareOf(x.investor_id);
       const nb = pieceNumbers({ purchase_price: x.purchase_price, target_price: x.target_price, fees: 0, status: 'achetee', investor_id: x.investor_id, investor_contribution: x.contribution }, share);
       const [lbl, tone] = PROP_ST[x.status] || PROP_ST.pending;
+      const pc = x.piece_id ? pieces.find((y) => y.id === x.piece_id) : null;
       return (
         <div key={x.id} className="card" style={{ cursor: 'default' }}>
           <div className="ph">
@@ -675,7 +684,7 @@ function Proposals({ items, byId, shareOf, onEdit, onDelete, onCreate }) {
           </div>
           <div className="bd">
             <div className="t">{x.brand ? x.brand + ' — ' : ''}{x.title}</div>
-            <div className="m">{[x.size && 'Taille ' + x.size, 'Pour ' + (byId[x.investor_id]?.full_name || 'partenaire')].filter(Boolean).join(' · ')}</div>
+            <div className="m">{[x.size && 'Taille ' + x.size, 'Pour ' + (byId[x.investor_id]?.full_name || 'partenaire'), pc && 'Pièce déjà enregistrée'].filter(Boolean).join(' · ')}</div>
             <div className="row" style={{ marginTop: 12 }}>
               <div><div className="m">Achat</div><div style={{ fontWeight: 700 }}>{eur(x.purchase_price)}</div></div>
               <div><div className="m">Mise demandée</div><div style={{ fontWeight: 700 }}>{eur(nb.mise)}</div></div>
@@ -683,7 +692,9 @@ function Proposals({ items, byId, shareOf, onEdit, onDelete, onCreate }) {
             </div>
             {x.responded_at && <div className="m" style={{ marginTop: 8, color: 'var(--muted)', fontSize: 12 }}>Réponse le {new Date(x.responded_at).toLocaleDateString('fr-FR')}</div>}
             <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-              {x.status === 'accepted' && <button className="btn sm" onClick={() => onCreate(x)}>Créer la pièce</button>}
+              {x.status === 'accepted' && (pc
+                ? <button className="btn sm" onClick={() => onAssign(x, pc)}>{pc.investor_id && pc.investor_id !== x.investor_id ? 'Ajouter en 2ᵉ partenaire' : 'Attribuer la pièce'}</button>
+                : <button className="btn sm" onClick={() => onCreate(x)}>Créer la pièce</button>)}
               <button className="btn ghost sm" onClick={() => onEdit(x)}>Modifier</button>
               <button className="btn danger sm" onClick={() => onDelete(x)}>Suppr.</button>
             </div>
@@ -704,12 +715,13 @@ function ProposalForm({ initial, investors, onClose, onSaved }) {
   const toggle = (id) => setTo((t) => (t.includes(id) ? t.filter((y) => y !== id) : [...t, id]));
   return (
     <Modal onClose={onClose}>
-      <h2>{initial.id ? 'Modifier la proposition' : 'Proposer une pièce'}</h2>
+      <h2>{initial.id ? 'Modifier la proposition' : initial.piece_id ? 'Proposer cette pièce' : 'Proposer une pièce'}</h2>
+      {initial.piece_id && !initial.id && <p className="m" style={{ fontSize: 13, marginTop: -6 }}>Pièce déjà enregistrée : si le partenaire est partant, tu cliques « Attribuer la pièce » et elle passe à son nom (ou en 2ᵉ partenaire).</p>}
       <p className="m" style={{ color: 'var(--muted)', fontSize: 13, marginTop: -6 }}>Le partenaire la voit en haut de son espace et répond « Je suis partant » ou « Pas pour moi ».</p>
       <form onSubmit={(e) => { e.preventDefault(); run(async () => {
         if (!x.title) throw new Error('Mets au moins un nom de pièce.');
         if (!initial.id && to.length === 0) throw new Error('Choisis au moins un partenaire.');
-        const base = { title: x.title, brand: x.brand || null, size: x.size || null, photos: x.photos || [], purchase_price: Number(x.purchase_price || 0), target_price: Number(x.target_price || 0), contribution: x.contribution === '' || x.contribution == null ? null : Number(x.contribution), note: x.note || null };
+        const base = { ...(x.piece_id ? { piece_id: x.piece_id } : {}), title: x.title, brand: x.brand || null, size: x.size || null, photos: x.photos || [], purchase_price: Number(x.purchase_price || 0), target_price: Number(x.target_price || 0), contribution: x.contribution === '' || x.contribution == null ? null : Number(x.contribution), note: x.note || null };
         const rows = initial.id ? [{ id: initial.id, ...base }] : to.map((id) => ({ ...base, investor_id: id }));
         await api.saveProposals(rows); onSaved();
       }); }}>

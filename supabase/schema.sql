@@ -154,3 +154,4 @@ language sql security definer set search_path = public as $$
   where id = pid and investor_id = auth.uid() and status = 'pending';
 $$;
 grant execute on function public.respond_proposal(uuid, boolean) to authenticated;
+alter table public.proposals add column if not exists piece_id uuid references public.pieces(id) on delete cascade;

@@ -5,7 +5,8 @@ import { api, DEMO } from '@/lib/data';
 import { eur, investorSummary, withExpenses, pieceFor, pieceNumbers } from '@/lib/calc';
 import { TopBar, Stat, PieceCard, PieceDetail, Modal, Footer, ExpenseList, ExpenseRule, useBusy } from '@/components/ui';
 
-const MV = { apport: 'Apport', retrait: 'Retrait de capital', versement_gains: 'Gains versés' };
+const MV = { apport: 'Apport', retrait: 'Retrait de capital', versement_gains: 'Gains versés', gain_plus: 'Gains ajoutés', gain_moins: 'Gains corrigés (−)' };
+const PLUS = (t) => t === 'apport' || t === 'gain_plus';
 
 export default function Espace() {
   const r = useRouter();
@@ -118,7 +119,7 @@ export default function Espace() {
             <div className="scroll"><table className="tbl">
               <thead><tr><th>Date</th><th>Mouvement</th><th>Mention</th><th className="r">Montant</th></tr></thead>
               <tbody>{mvts.map((m) => (
-                <tr key={m.id}><td>{new Date(m.date).toLocaleDateString('fr-FR')}</td><td><b>{MV[m.type]}</b></td><td className="m" style={{ color: 'var(--muted)' }}>{m.note}</td><td className="r"><b>{m.type === 'apport' ? '+' : '−'}{eur(m.amount)}</b></td></tr>
+                <tr key={m.id}><td>{new Date(m.date).toLocaleDateString('fr-FR')}</td><td><b>{MV[m.type]}</b></td><td className="m" style={{ color: 'var(--muted)' }}>{m.note}</td><td className="r"><b>{PLUS(m.type) ? '+' : '−'}{eur(m.amount)}</b></td></tr>
               ))}</tbody>
             </table></div>
           )}

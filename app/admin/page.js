@@ -6,7 +6,8 @@ import { STATUS, EXPENSE_TYPES, EXPENSE_STATUS, eur, investorSummary, pieceNumbe
 import AccountChart from '@/components/AccountChart';
 import { TopBar, Stat, PieceCard, PieceDetail, Modal, Footer, Badge, ExpenseList, ExpenseRule, useBusy } from '@/components/ui';
 
-const MV = { apport: 'Apport', retrait: 'Retrait de capital', versement_gains: 'Gains versés' };
+const MV = { apport: 'Apport', retrait: 'Retrait de capital', versement_gains: 'Gains versés', gain_plus: 'Gains ajoutés', gain_moins: 'Gains corrigés (−)' };
+const PLUS = (t) => t === 'apport' || t === 'gain_plus';
 const today = () => new Date().toISOString().slice(0, 10);
 
 export default function Admin() {
@@ -69,8 +70,9 @@ export default function Admin() {
   const shareE = (e) => (e.investor_id ? shareOf(e.investor_id) : 0);
   const invReal = sold.reduce((a, p) => a + morgzNumbers(p, shareOf).investorPart, 0)
     - generalPaid.reduce((a, e) => a + partnerPortion(e, shareE(e)), 0);
-  const morgzNet = morgzReal - generalPaid.reduce((a, e) => a + Number(e.amount) - partnerPortion(e, shareE(e)), 0);
-  const acc = morgzSummary(pieces, exps, shareOf);
+  const morgzNet0 = morgzReal - generalPaid.reduce((a, e) => a + Number(e.amount) - partnerPortion(e, shareE(e)), 0);
+  const acc = morgzSummary(pieces, exps, shareOf, mvts);
+  const ajustInv = mvts.filter((m) => m.investor_id).reduce((a, m) => a + (m.type === 'gain_plus' ? Number(m.amount || 0) : m.type === 'gain_moins' ? -Number(m.amount || 0) : 0), 0);
   // Mon capital (fonds propres) = mes apports − mes retraits + mes gains nets réalisés.
   const myCapital = mySum('apport') - mySum('retrait') - mySum('versement_gains') + acc.solde;
   const pieceName = (id) => { const p = pieces.find((x) => x.id === id); return p ? (p.brand ? p.brand + ' — ' : '') + p.title : 'Pièce supprimée'; };
@@ -93,8 +95,8 @@ export default function Admin() {
         <div className="stats">
           <Stat dark k="Capital partenaires" v={eur(capital)} h={`${eur(engage)} engagés · ${eur(capital - engage - generalAll)} disponibles`} />
           <Stat k="Mon capital (fonds propres)" v={eur(myCapital)} h={`${eur(engageMine)} engagés · ${eur(myCapital - engageMine)} disponibles`} />
-          <Stat k="Ta marge réalisée" v={eur(morgzNet, true)} h="Part Morgz sur pièces vendues, après frais" />
-          <Stat k="Dû aux partenaires" v={eur(invReal, true)} h="Gains réalisés, avant versements" />
+          <Stat k="Ta marge réalisée" v={eur(morgzNet0 - ajustInv, true)} h="Part Morgz sur pièces vendues, après frais" />
+          <Stat k="Dû aux partenaires" v={eur(invReal + ajustInv, true)} h="Gains réalisés, avant versements" />
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
@@ -174,7 +176,7 @@ export default function Admin() {
                 <td>{m.investor_id ? byId[m.investor_id]?.full_name || '—' : <b>Morgz (fonds propres)</b>}</td>
                 <td><b>{MV[m.type]}</b></td>
                 <td className="m" style={{ color: 'var(--muted)' }}>{m.note}</td>
-                <td className="r"><b>{m.type === 'apport' ? '+' : '−'}{eur(m.amount)}</b></td>
+                <td className="r"><b>{PLUS(m.type) ? '+' : '−'}{eur(m.amount)}</b></td>
                 <td className="r" style={{ whiteSpace: 'nowrap' }}><button className="btn ghost sm" onClick={() => setEditMv(m)}>Modifier</button> <button className="btn danger sm" onClick={async () => { if (confirm('Supprimer ce mouvement ?')) { await api.deleteMovement(m.id); load(); } }}>Suppr.</button></td>
               </tr>
             ))}</tbody>
@@ -415,7 +417,7 @@ function MovementForm({ investors, initial, fixedInvestor, onClose, onSaved }) {
       }); }}>
         <div className="fgrid">
           <Field label="Pour qui ?"><select value={m.investor_id || ''} onChange={set('investor_id')} disabled={!!fixedInvestor}>{!fixedInvestor && <option value="">Morgz (mes fonds propres)</option>}{investors.map((i) => <option key={i.id} value={i.id}>{i.full_name || i.email}</option>)}</select></Field>
-          <Field label="Type"><select value={m.type} onChange={set('type')}>{Object.entries(MV).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
+          <Field label="Type"><select value={m.type} onChange={set('type')}>{Object.entries(MV).filter(([k]) => m.investor_id || !k.startsWith('gain_')).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
           <Field label="Montant (€)"><input className="in-f" type="number" step="0.01" min="0" required value={m.amount} onChange={set('amount')} /></Field>
           <Field label="Date"><input className="in-f" type="date" required value={m.date} onChange={set('date')} /></Field>
           <Field label="Mention (visible par le partenaire)" full><textarea value={m.note || ''} onChange={set('note')} placeholder="Virement reçu, réf. PARTNER…" /></Field>
@@ -432,6 +434,7 @@ function PartnerEditor({ inv, pieces, mvts, exps = [], onClose, reload, onDelete
   const [f, setF] = useState({ full_name: inv.full_name || '', email: inv.email || '', share_pct: inv.share_pct ?? 60, password: '' });
   const [saved, setSaved] = useState(false);
   const [mv, setMv] = useState(null);
+  const [gainEdit, setGainEdit] = useState(null);
   const [del, setDel] = useState(false);
   const [confirmName, setConfirmName] = useState('');
   const { busy, err, run } = useBusy();
@@ -451,12 +454,37 @@ function PartnerEditor({ inv, pieces, mvts, exps = [], onClose, reload, onDelete
         <div><div className="k">Capital investi</div><div className="v">{eur(s.capital)}</div></div>
         <div><div className="k">Engagé en pièces</div><div className="v">{eur(s.engage)}</div></div>
         <div><div className="k">Disponible</div><div className="v">{eur(s.disponible)}</div></div>
-        <div><div className="k">Gains réalisés</div><div className="v pos">{eur(s.gainsRealises, true)}</div></div>
+        <div><div className="k">Gains réalisés{s.ajust ? ' (dont ajust. ' + eur(s.ajust, true) + ')' : ''}</div><div className="v pos">{eur(s.gainsRealises, true)}</div><button type="button" className="btn ghost sm" style={{ marginTop: 8 }} onClick={() => setGainEdit({ value: Math.round(s.gainsRealises * 100) / 100, note: '' })}>Modifier</button></div>
         <div><div className="k">Gains versés</div><div className="v">{eur(s.verses)}</div></div>
         <div><div className="k">Valeur actuelle</div><div className="v">{eur(s.valeur)}</div></div>
         <div><div className="k">Frais ({exps.length})</div><div className="v">{eur(s.fraisTotal)}</div></div>
         <div><div className="k">Sa part des frais</div><div className="v">{eur(s.fraisPart)}</div></div>
       </div>
+
+      {gainEdit && (
+        <form className="msgcard" style={{ marginTop: 14 }} onSubmit={(e) => { e.preventDefault(); run(async () => {
+          const target = Number(gainEdit.value);
+          if (!isFinite(target)) throw new Error('Montant invalide.');
+          const diff = Math.round((target - s.gainsRealises) * 100) / 100;
+          if (diff === 0) { setGainEdit(null); return; }
+          await api.saveMovement({ investor_id: inv.id, type: diff > 0 ? 'gain_plus' : 'gain_moins', amount: Math.abs(diff), date: today(), note: gainEdit.note || 'Ajustement des gains' });
+          setGainEdit(null); await reload();
+        }); }}>
+          <b>Modifier ses gains réalisés</b>
+          <p className="m" style={{ color: 'var(--muted)', fontSize: 13, margin: '6px 0 12px' }}>Mets le montant qu'il doit voir. L'écart est enregistré comme un ajustement (visible dans son historique) et déduit de ta part{' '}(ou ajouté si tu baisses).</p>
+          <div className="fgrid">
+            <Field label="Gains réalisés (€)"><input className="in-f" type="number" step="0.01" required value={gainEdit.value} onChange={(e) => setGainEdit({ ...gainEdit, value: e.target.value })} /></Field>
+            <Field label="Mention (visible par lui)"><input className="in-f" value={gainEdit.note} onChange={(e) => setGainEdit({ ...gainEdit, note: e.target.value })} placeholder="ex. Bonus vente Chanel" /></Field>
+          </div>
+          {gainEdit.value !== '' && Number(gainEdit.value) !== Math.round(s.gainsRealises * 100) / 100 && <div className="m" style={{ marginTop: 8, fontSize: 13 }}>Ajustement : <b>{eur(Number(gainEdit.value) - s.gainsRealises, true)}</b></div>}
+          <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+            <button className="btn sm" disabled={busy}>Enregistrer</button>
+            <button type="button" className="btn ghost sm" onClick={() => setGainEdit(null)}>Annuler</button>
+          </div>
+        </form>
+      )}
+
+      <Releve s={s} pieces={pieces} mvts={mvts} exps={exps} share={f.share_pct} />
 
       <MessageBox inv={inv} reload={reload} />
 
@@ -490,7 +518,7 @@ function PartnerEditor({ inv, pieces, mvts, exps = [], onClose, reload, onDelete
             <tr key={m.id}>
               <td>{new Date(m.date).toLocaleDateString('fr-FR')}{m.note ? <div className="m" style={{ color: 'var(--muted)', fontSize: 12 }}>{m.note}</div> : null}</td>
               <td><b>{MV[m.type]}</b></td>
-              <td className="r"><b>{m.type === 'apport' ? '+' : '−'}{eur(m.amount)}</b></td>
+              <td className="r"><b>{PLUS(m.type) ? '+' : '−'}{eur(m.amount)}</b></td>
               <td className="r" style={{ whiteSpace: 'nowrap' }}>
                 <button className="btn ghost sm" onClick={() => setMv(m)}>Modifier</button>{' '}
                 <button className="btn danger sm" onClick={() => run(async () => { await api.deleteMovement(m.id); await reload(); })}>×</button>
@@ -626,7 +654,7 @@ function MyAccount({ acc, byId, onOpen }) {
             <tbody>{rows.map((x, i) => (
               <tr key={i} style={x.piece ? { cursor: 'pointer' } : null} onClick={() => x.piece && onOpen(x.piece)}>
                 <td>{new Date(x.date).toLocaleDateString('fr-FR')}</td>
-                <td><b>{x.kind === 'vente' ? 'Vente' : 'Frais'}</b><div className="m" style={{ color: 'var(--muted)', fontSize: 12.5 }}>{x.label}{x.kind === 'vente' && x.margin != null ? ` · marge ${eur(x.margin)}` : ''}</div></td>
+                <td><b>{x.kind === 'vente' ? 'Vente' : x.kind === 'ajust' ? 'Ajustement gains' : 'Frais'}</b><div className="m" style={{ color: 'var(--muted)', fontSize: 12.5 }}>{x.label}{x.kind === 'vente' && x.margin != null ? ` · marge ${eur(x.margin)}` : ''}</div></td>
                 <td className="m" style={{ color: 'var(--muted)' }}>{x.investor_id ? byId[x.investor_id]?.full_name || '—' : 'Perso (100 %)'}</td>
                 <td className={'r ' + (x.amount >= 0 ? 'pos' : 'neg')}><b>{eur(x.amount, true)}</b></td>
                 <td className="r">{eur(x.balance)}</td>
@@ -750,5 +778,73 @@ function ProposalForm({ initial, investors, onClose, onSaved }) {
         </div>
       </form>
     </Modal>
+  );
+}
+
+
+/** Relevé du partenaire : ce que j'ai acheté pour lui, ce que j'ai dépensé, ce qu'il lui reste. */
+function Releve({ s, pieces, mvts, exps, share }) {
+  const [open, setOpen] = useState(true);
+  const d = (x) => (x ? new Date(x).toLocaleDateString('fr-FR') : '—');
+  const nm = (p) => (p.brand ? p.brand + ' — ' : '') + p.title;
+  const active = pieces.filter((p) => p.status === 'achetee' || p.status === 'en_vente');
+  const sold = pieces.filter((p) => p.status === 'vendue');
+  const other = pieces.filter((p) => !active.includes(p) && !sold.includes(p));
+  const general = exps.filter((e) => !e.piece_id);
+  const linked = exps.filter((e) => e.piece_id);
+  const row = (k, v, strong, cls) => <div className="row" style={{ padding: '7px 0', borderBottom: '1px solid var(--line)', fontWeight: strong ? 800 : 500 }}><span>{k}</span><span className={cls}>{v}</span></div>;
+  return (
+    <div style={{ marginTop: 22 }}>
+      <div className="row"><h3 style={{ margin: 0, fontSize: 17 }}>Relevé : où est passé son argent</h3><button type="button" className="btn ghost sm" onClick={() => setOpen(!open)}>{open ? 'Masquer' : 'Afficher'}</button></div>
+      {open && <>
+        <div style={{ marginTop: 10, background: '#f7f7f8', borderRadius: 18, padding: '8px 18px' }}>
+          {row('Argent qu\'il t\'a confié (apports − retraits)', eur(s.capital))}
+          {row(`Dans les pièces en cours (${active.length})`, '− ' + eur(s.engage))}
+          {row(`Frais généraux avancés (${general.length})`, '− ' + eur(s.fraisGeneraux.all))}
+          {row('Il lui reste à investir', eur(s.disponible), true, s.disponible < 0 ? 'neg' : '')}
+          {row('Gains réalisés non versés', eur(s.gainsADispo, true), false, 'pos')}
+        </div>
+
+        <h4 style={{ margin: '18px 0 8px', fontSize: 15 }}>Pièces achetées pour lui</h4>
+        {pieces.length === 0 ? <div className="m" style={{ color: 'var(--muted)' }}>Aucune pièce.</div> : (
+          <div className="scroll"><table className="tbl">
+            <thead><tr><th>Achat</th><th>Pièce</th><th>Statut</th><th className="r">Prix pièce</th><th className="r">Sa mise</th><th className="r">Résultat</th></tr></thead>
+            <tbody>{[...active, ...sold, ...other].map((p) => {
+              const nb = pieceNumbers(p, share);
+              return (
+                <tr key={p.id}>
+                  <td>{d(p.purchased_at)}</td>
+                  <td><b>{nm(p)}</b><div className="m" style={{ color: 'var(--muted)', fontSize: 12 }}>{[p.size && 'Taille ' + p.size, p.co_partner_id && 'à 2 partenaires'].filter(Boolean).join(' · ')}</div></td>
+                  <td><Badge status={p.status} /></td>
+                  <td className="r">{eur(nb.cost)}</td>
+                  <td className="r"><b>{eur(nb.mise)}</b></td>
+                  <td className="r">{nb.sold ? <span className="pos">récupère {eur(nb.retour)}<div className="m" style={{ fontSize: 12 }}>dont {eur(nb.investorPart, true)}</div></span> : <span className="m" style={{ color: 'var(--muted)' }}>en cours · visé {eur(nb.investorPartTarget, true)}</span>}</td>
+                </tr>
+              );
+            })}</tbody>
+          </table></div>
+        )}
+
+        <h4 style={{ margin: '18px 0 8px', fontSize: 15 }}>Dépenses faites pour lui</h4>
+        {exps.length === 0 ? <div className="m" style={{ color: 'var(--muted)' }}>Aucune dépense.</div> : (
+          <div className="scroll"><table className="tbl">
+            <thead><tr><th>Date</th><th>Dépense</th><th>Rattachée à</th><th className="r">Montant</th><th className="r">Sa part</th></tr></thead>
+            <tbody>{[...general, ...linked].sort((a, b) => String(b.date).localeCompare(String(a.date))).map((e) => {
+              const pc = e.piece_id ? pieces.find((p) => p.id === e.piece_id) : null;
+              return (
+                <tr key={e.id}>
+                  <td>{d(e.date)}</td>
+                  <td><b>{EXPENSE_TYPES[e.type] || 'Frais'}</b><div className="m" style={{ color: 'var(--muted)', fontSize: 12 }}>{e.label}{e.status === 'prevu' ? ' · prévu' : ''}</div></td>
+                  <td className="m">{pc ? nm(pc) : 'Général'}</td>
+                  <td className="r">{eur(e.amount)}</td>
+                  <td className="r"><b>{eur(partnerPortion(e, share))}</b></td>
+                </tr>
+              );
+            })}</tbody>
+          </table></div>
+        )}
+        <p className="m" style={{ color: 'var(--muted)', fontSize: 12, marginTop: 8 }}>Une pièce vendue lui rend sa mise + sa part : elle n'est plus comptée dans « en cours ». Les frais rattachés à une pièce sont déjà retirés de la marge de cette pièce.</p>
+      </>}
+    </div>
   );
 }

@@ -19,11 +19,11 @@ async function guard(req) {
 /** Crée un compte partenaire. */
 export async function POST(req) {
   const g = await guard(req); if (g.error) return g.error;
-  const { email, password, full_name, share_pct } = await req.json();
+  const { email, password, full_name, share_pct, role } = await req.json();
   if (!email || !password || password.length < 8) return Response.json({ error: 'Email et mot de passe (8 caractères min.) requis' }, { status: 400 });
   const { data, error } = await g.admin.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { full_name } });
   if (error) return Response.json({ error: error.message }, { status: 400 });
-  await g.admin.from('profiles').upsert({ id: data.user.id, email, full_name, role: 'investor', share_pct: Number(share_pct) || 60 });
+  await g.admin.from('profiles').upsert({ id: data.user.id, email, full_name, role: role === 'client' ? 'client' : 'investor', share_pct: Number(share_pct) || 60 });
   return Response.json({ id: data.user.id });
 }
 

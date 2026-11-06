@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, DEMO } from '@/lib/data';
-import { eur, investorSummary, withExpenses, pieceFor, pieceNumbers } from '@/lib/calc';
+import { eur, investorSummary, withExpenses, pieceFor, pieceNumbers, ORDER_STATUS, ORDER_STEPS, orderNumbers } from '@/lib/calc';
 import { TopBar, Stat, PieceCard, PieceDetail, Modal, Footer, ExpenseList, ExpenseRule, useBusy } from '@/components/ui';
 
 const MV = { apport: 'Apport', retrait: 'Retrait de capital', versement_gains: 'Gains versés', gain_plus: 'Gains ajoutés', gain_moins: 'Gains corrigés (−)' };
@@ -18,6 +18,7 @@ export default function Espace() {
   const [pwd, setPwd] = useState(false);
   const [props, setProps] = useState([]);
   const [answering, setAnswering] = useState(null);
+  const [orders, setOrders] = useState([]);
 
   useEffect(() => {
     (async () => {
@@ -26,6 +27,7 @@ export default function Espace() {
       if (!m) return r.replace('/login');
       if (m.role === 'admin') return r.replace('/admin');
       setMe(m);
+      if (m.role === 'client') { setOrders(await api.orders(m.id)); return; }
       const ex = await api.expenses(m.id);
       setExps(ex);
       setPieces(withExpenses(await api.pieces(m.id), ex).map((p) => pieceFor(p, m.id)));
@@ -35,6 +37,7 @@ export default function Espace() {
   }, [r]);
 
   if (!me) return null;
+  if (me.role === 'client') return <ClientSpace me={me} orders={orders} />;
   const share = me.share_pct ?? 60;
   const s = investorSummary(pieces, mvts, share, exps);
   const pieceName = (id) => { const p = pieces.find((x) => x.id === id); return p ? (p.brand ? p.brand + ' — ' : '') + p.title : 'Pièce'; };
@@ -152,5 +155,66 @@ function PasswordModal({ onClose }) {
         </form>
       )}
     </Modal>
+  );
+}
+
+
+/** Espace acheteur : il suit ses commandes, sans jamais voir mes coûts. */
+function ClientSpace({ me, orders }) {
+  const first = (me.full_name || '').split(' ')[0];
+  const open = orders.filter((o) => o.status !== 'livree' && o.status !== 'annulee');
+  const past = orders.filter((o) => !open.includes(o));
+  const d = (x) => new Date(x).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
+  const Card = ({ o }) => {
+    const nb = orderNumbers(o);
+    const idx = ORDER_STEPS.indexOf(o.status);
+    return (
+      <div className="ordcard">
+        <div className="oimg">{o.photos?.[0] ? <img src={o.photos[0]} alt="" /> : <span className="m">Photo à venir</span>}</div>
+        <div className="ob">
+          <div className="row" style={{ alignItems: 'flex-start' }}>
+            <div>
+              <div className="t" style={{ fontWeight: 800, fontSize: 18, letterSpacing: '-.02em' }}>{o.brand ? o.brand + ' — ' : ''}{o.title}</div>
+              <div className="m" style={{ color: 'var(--muted)' }}>{[o.size, o.reference && 'Réf. ' + o.reference].filter(Boolean).join(' · ')}</div>
+            </div>
+            <span className={'badge ' + (o.status === 'livree' ? 'ok' : o.status === 'annulee' ? 'late' : 'warn')}>{ORDER_STATUS[o.status]}</span>
+          </div>
+          {o.status !== 'annulee' && (
+            <div className="steps">{ORDER_STEPS.map((st, i) => (
+              <div key={st} className={'st ' + (i < idx ? 'done' : i === idx ? 'cur' : '')}><i /><span>{ORDER_STATUS[st]}</span></div>
+            ))}</div>
+          )}
+          <div className="bar"><i style={{ width: Math.min(100, Number(o.progress || 0)) + '%' }} /></div>
+          <div className="m" style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 6 }}>Avancement : {Number(o.progress || 0)} %{o.eta && o.status !== 'livree' ? ` · prévue vers le ${d(o.eta)}` : ''}{o.status === 'livree' && o.delivered_at ? ` · livrée le ${d(o.delivered_at)}` : ''}</div>
+          <div className="kv" style={{ marginTop: 14 }}>
+            <div><div className="k">Prix</div><div className="v">{o.price != null ? eur(nb.price) : 'À confirmer'}</div></div>
+            <div><div className="k">Acompte versé</div><div className="v">{eur(nb.deposit)}</div></div>
+            <div><div className="k">Reste à payer</div><div className="v">{eur(nb.reste)}</div></div>
+          </div>
+          {o.client_note && (
+            <div className="msgcard" style={{ marginTop: 14, marginBottom: 0 }}>
+              <div className="msghead"><span className="msgdot" />Où en est Morgz{o.updated_at && <span className="msgdate">{d(o.updated_at)}</span>}</div>
+              <p>{o.client_note}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+  return (
+    <>
+      <TopBar me={me} />
+      <main className="wrap">
+        <section className="hero">
+          <div className="eyebrow">Suivi de commande</div>
+          <h1>{first ? `Bonjour ${first}.` : 'Bonjour.'}</h1>
+          <p className="sub">Voici où en sont tes pièces.</p>
+        </section>
+        {orders.length === 0 && <div className="empty">Aucune commande pour le moment.</div>}
+        {open.length > 0 && <><h2>En cours</h2><div style={{ display: 'grid', gap: 16, marginBottom: 30 }}>{open.map((o) => <Card key={o.id} o={o} />)}</div></>}
+        {past.length > 0 && <><h2>Historique</h2><div style={{ display: 'grid', gap: 16 }}>{past.map((o) => <Card key={o.id} o={o} />)}</div></>}
+        <Footer client />
+      </main>
+    </>
   );
 }

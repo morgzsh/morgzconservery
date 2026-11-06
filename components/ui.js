@@ -27,7 +27,7 @@ export function TopBar({ me, admin }) {
       <div className="top">
         <div className="in">
           <img src="/logo.png" alt="morgzconservery." />
-          <span className="pill">PARTNER</span>
+          <span className="pill">{me?.role === 'client' ? 'CLIENT' : 'PARTNER'}</span>
           <span className="sp" />
           {admin && <span className="badge dark">Admin</span>}
           <span className="who">{admin ? 'Morgz' : me?.full_name || me?.email}</span>
@@ -167,7 +167,8 @@ export function useBusy() {
   return { busy, err, run, setErr };
 }
 
-export function Footer() {
+export function Footer({ client }) {
+  if (client) return <div className="foot">morgzconservery. · Paris — Worldwide · Dates et avancement indicatifs.</div>;
   return <div className="foot">morgzconservery. partner · Paris — Worldwide · Montants visés indicatifs, capital et gains non garantis.</div>;
 }
 

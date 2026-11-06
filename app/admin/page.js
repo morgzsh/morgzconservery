@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, DEMO } from '@/lib/data';
-import { STATUS, EXPENSE_TYPES, EXPENSE_STATUS, eur, investorSummary, pieceNumbers, withExpenses, morgzSummary, partnerPortion, hasTwo, isPartnerOf, pieceFor, morgzNumbers } from '@/lib/calc';
+import { STATUS, EXPENSE_TYPES, EXPENSE_STATUS, eur, investorSummary, pieceNumbers, withExpenses, morgzSummary, partnerPortion, hasTwo, isPartnerOf, pieceFor, morgzNumbers, ORDER_STATUS, ORDER_STEPS, ORDER_OPEN, orderNumbers } from '@/lib/calc';
 import AccountChart from '@/components/AccountChart';
 import { TopBar, Stat, PieceCard, PieceDetail, Modal, Footer, Badge, ExpenseList, ExpenseRule, useBusy } from '@/components/ui';
 
@@ -22,6 +22,10 @@ export default function Admin() {
   const [view, setView] = useState(null);
   const [edit, setEdit] = useState(null);
   const [newInv, setNewInv] = useState(false);
+  const [orders, setOrders] = useState([]);
+  const [editOrd, setEditOrd] = useState(null);
+  const [newClient, setNewClient] = useState(false);
+  const [editClient, setEditClient] = useState(null);
   const [editInv, setEditInv] = useState(null);
   const [newMv, setNewMv] = useState(false);
   const [editMv, setEditMv] = useState(null);
@@ -37,6 +41,7 @@ export default function Admin() {
     setPieces(withExpenses(await api.pieces(), ex));
     setMvts(await api.movements());
     setProps(await api.proposals());
+    setOrders(await api.orders());
   }, []);
 
   useEffect(() => {
@@ -51,6 +56,7 @@ export default function Admin() {
 
   if (!me) return null;
   const investors = profiles.filter((p) => p.role === 'investor');
+  const clients = profiles.filter((p) => p.role === 'client');
   const byId = Object.fromEntries(profiles.map((p) => [p.id, p]));
   const shareOf = (id) => byId[id]?.share_pct ?? 60;
 
@@ -71,7 +77,7 @@ export default function Admin() {
   const invReal = sold.reduce((a, p) => a + morgzNumbers(p, shareOf).investorPart, 0)
     - generalPaid.reduce((a, e) => a + partnerPortion(e, shareE(e)), 0);
   const morgzNet0 = morgzReal - generalPaid.reduce((a, e) => a + Number(e.amount) - partnerPortion(e, shareE(e)), 0);
-  const acc = morgzSummary(pieces, exps, shareOf, mvts);
+  const acc = morgzSummary(pieces, exps, shareOf, mvts, orders);
   const ajustInv = mvts.filter((m) => m.investor_id).reduce((a, m) => a + (m.type === 'gain_plus' ? Number(m.amount || 0) : m.type === 'gain_moins' ? -Number(m.amount || 0) : 0), 0);
   // Mon capital (fonds propres) = mes apports − mes retraits + mes gains nets réalisés.
   const myCapital = mySum('apport') - mySum('retrait') - mySum('versement_gains') + acc.solde;
@@ -101,13 +107,14 @@ export default function Admin() {
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <div className="tabs">
-            {[['pieces', 'Pièces'], ['props', 'Propositions' + (props.filter((x) => x.status === 'accepted').length ? ' · ' + props.filter((x) => x.status === 'accepted').length : '')], ['investors', 'Partenaires'], ['mvts', 'Mouvements'], ['frais', 'Frais'], ['compte', 'Mes comptes']].map(([k, l]) => (
+            {[['pieces', 'Pièces'], ['props', 'Propositions' + (props.filter((x) => x.status === 'accepted').length ? ' · ' + props.filter((x) => x.status === 'accepted').length : '')], ['clients', 'Clients' + (orders.filter(ORDER_OPEN).length ? ' · ' + orders.filter(ORDER_OPEN).length : '')], ['investors', 'Partenaires'], ['mvts', 'Mouvements'], ['frais', 'Frais'], ['compte', 'Mes comptes']].map(([k, l]) => (
               <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
             ))}
           </div>
           <div style={{ marginBottom: 22 }}>
             {tab === 'pieces' && <button className="btn" onClick={() => setEdit({})}>+ Nouvelle pièce</button>}
             {tab === 'props' && <button className="btn" onClick={() => setEditProp({})}>+ Proposer une pièce</button>}
+            {tab === 'clients' && <><button className="btn ghost" onClick={() => setNewClient(true)}>+ Client</button><button className="btn" onClick={() => setEditOrd({ client_id: clients[0]?.id || '', status: 'demande', progress: 0 })}>+ Commande client</button></>}
             {tab === 'investors' && <button className="btn" onClick={() => setNewInv(true)}>+ Nouveau partenaire</button>}
             {tab === 'frais' && <button className="btn" onClick={() => setEditEx({})}>+ Nouveau frais</button>}
             {tab === 'compte' && <button className="btn" onClick={() => setEditEx({ investor_id: '' })}>+ Frais perso</button>}
@@ -146,6 +153,8 @@ export default function Admin() {
           onEdit={(x) => setEditProp(x)}
           onDelete={async (x) => { if (confirm('Supprimer cette proposition ?')) { await api.deleteProposal(x.id); load(); } }}
           onCreate={(x) => setEdit({ title: x.title, brand: x.brand || '', size: x.size || '', photos: x.photos || [], purchase_price: x.purchase_price, target_price: x.target_price, investor_id: x.investor_id, investor_contribution: x.contribution ?? '', notes: x.note || '', status: 'achetee', _fromProp: x.id })} />}
+
+        {tab === 'clients' && <Clients orders={orders} clients={clients} byId={byId} onOrder={(o) => setEditOrd(o)} onClient={(c) => setEditClient(c)} />}
 
         {tab === 'investors' && (investors.length === 0 ? <div className="empty">Aucun partenaire.</div> : (
           <div className="scroll"><table className="tbl">
@@ -189,7 +198,7 @@ export default function Admin() {
             <ExpenseRule share={60} />
           </>
         )}
-        {tab === 'compte' && <MyAccount acc={acc} byId={byId} onOpen={(p) => setView(p)} />}
+        {tab === 'compte' && <MyAccount acc={acc} byId={byId} onOpen={(p) => setView(p)} onOrder={(o) => setEditOrd(o)} />}
         <Footer />
       </main>
 
@@ -205,6 +214,9 @@ export default function Admin() {
       )}
       {edit && <PieceForm initial={edit} investors={investors} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(); }} />}
       {editProp && <ProposalForm initial={editProp} investors={investors} onClose={() => setEditProp(null)} onSaved={() => { setEditProp(null); load(); }} />}
+      {editOrd && <OrderForm initial={editOrd} clients={clients} onClose={() => setEditOrd(null)} onSaved={() => { setEditOrd(null); load(); }} />}
+      {newClient && <InvestorForm client onClose={() => setNewClient(false)} onSaved={() => { setNewClient(false); load(); }} />}
+      {editClient && <ClientEditor c={editClient} orders={orders.filter((o) => o.client_id === editClient.id)} onClose={() => setEditClient(null)} onSaved={() => { setEditClient(null); load(); }} />}
       {newInv && <InvestorForm onClose={() => setNewInv(false)} onSaved={() => { setNewInv(false); load(); }} />}
       {editInv && byId[editInv.id] && (
         <PartnerEditor inv={byId[editInv.id]} pieces={piecesOf(editInv.id)} mvts={mvts.filter((m) => m.investor_id === editInv.id)} exps={exOf(editInv.id)}
@@ -354,7 +366,7 @@ function genPwd() {
   return Array.from({ length: 12 }, () => c[Math.floor(Math.random() * c.length)]).join('');
 }
 
-function InvestorForm({ initial, onClose, onSaved }) {
+function InvestorForm({ initial, onClose, onSaved, client: isClient }) {
   const editing = !!initial;
   const [f, setF] = useState({ full_name: '', email: '', share_pct: 60, password: genPwd(), apport: '', ...initial });
   const [done, setDone] = useState(null);
@@ -363,24 +375,25 @@ function InvestorForm({ initial, onClose, onSaved }) {
 
   if (done) return (
     <Modal onClose={onSaved}>
-      <h2>Partenaire créé ✅</h2>
+      <h2>{isClient ? 'Client créé ✅' : 'Partenaire créé ✅'}</h2>
       <p>Envoie-lui ces identifiants (il pourra changer son mot de passe ensuite) :</p>
       <div className="kv" style={{ gridTemplateColumns: '1fr' }}>
         <div><div className="k">Lien</div><div className="v" style={{ fontSize: 15 }}>{typeof location !== 'undefined' ? location.origin : ''}/login</div></div>
         <div><div className="k">Email</div><div className="v" style={{ fontSize: 15 }}>{done.email}</div></div>
         {!DEMO && <div><div className="k">Mot de passe</div><div className="v" style={{ fontSize: 15 }}>{done.password}</div></div>}
       </div>
-      <button className="btn" onClick={() => navigator.clipboard?.writeText(`Ton espace morgzconservery. partner : ${location.origin}/login\nEmail : ${done.email}${DEMO ? '' : `\nMot de passe : ${done.password}`}`)}>Copier le message</button>
+      <button className="btn" onClick={() => navigator.clipboard?.writeText(`${isClient ? 'Suis ta commande morgzconservery.' : 'Ton espace morgzconservery. partner'} : ${location.origin}/login\nEmail : ${done.email}${DEMO ? '' : `\nMot de passe : ${done.password}`}`)}>Copier le message</button>
     </Modal>
   );
 
   return (
     <Modal onClose={onClose}>
-      <h2>{editing ? 'Modifier le partenaire' : 'Nouveau partenaire'}</h2>
+      <h2>{isClient ? 'Nouveau client' : editing ? 'Modifier le partenaire' : 'Nouveau partenaire'}</h2>
+      {isClient && <p className="m" style={{ color: 'var(--muted)', fontSize: 13, marginTop: -6 }}>Il verra seulement ses commandes : où en est la pièce, le prix, l'acompte et la date prévue. Jamais tes coûts.</p>}
       <form onSubmit={(e) => { e.preventDefault(); run(async () => {
         if (editing) { await api.updateInvestor({ id: f.id, full_name: f.full_name, share_pct: Number(f.share_pct) }); return onSaved(); }
-        await api.createInvestor({ email: f.email.trim(), password: f.password, full_name: f.full_name, share_pct: Number(f.share_pct) });
-        if (Number(f.apport) > 0) {
+        await api.createInvestor({ email: f.email.trim(), password: f.password, full_name: f.full_name, share_pct: isClient ? 0 : Number(f.share_pct), role: isClient ? 'client' : 'investor' });
+        if (!isClient && Number(f.apport) > 0) {
           const inv = (await api.profiles()).find((x) => x.email === f.email.trim());
           if (inv) await api.saveMovement({ investor_id: inv.id, type: 'apport', amount: Number(f.apport), date: today(), note: 'Apport initial' });
         }
@@ -388,11 +401,11 @@ function InvestorForm({ initial, onClose, onSaved }) {
       }); }}>
         <div className="fgrid">
           <Field label="Nom et prénom"><input className="in-f" required value={f.full_name} onChange={set('full_name')} /></Field>
-          <Field label="Part de la marge (%)"><input className="in-f" type="number" min="0" max="100" value={f.share_pct} onChange={set('share_pct')} /></Field>
+          {isClient ? <div /> : <Field label="Part de la marge (%)"><input className="in-f" type="number" min="0" max="100" value={f.share_pct} onChange={set('share_pct')} /></Field>}
           {!editing && <>
             <Field label="Email"><input className="in-f" type="email" required value={f.email} onChange={set('email')} /></Field>
             {!DEMO ? <Field label="Mot de passe provisoire"><input className="in-f" required minLength={8} value={f.password} onChange={set('password')} /></Field> : <div />}
-            <Field label="Apport initial (€, optionnel)"><input className="in-f" type="number" min="0" value={f.apport} onChange={set('apport')} /></Field>
+            {!isClient && <Field label="Apport initial (€, optionnel)"><input className="in-f" type="number" min="0" value={f.apport} onChange={set('apport')} /></Field>}
           </>}
         </div>
         <button className="btn" style={{ marginTop: 18 }} disabled={busy}>{busy ? '…' : editing ? 'Enregistrer' : 'Créer le compte'}</button>
@@ -630,7 +643,7 @@ function ExpenseForm({ initial, investors, pieces, onClose, onSaved }) {
   );
 }
 
-function MyAccount({ acc, byId, onOpen }) {
+function MyAccount({ acc, byId, onOpen, onOrder }) {
   const rows = [...acc.ledger].reverse();
   return (
     <>
@@ -652,10 +665,10 @@ function MyAccount({ acc, byId, onOpen }) {
           <div className="scroll"><table className="tbl journal">
             <thead><tr><th>Date</th><th>Opération</th><th>Partenaire</th><th className="r">Montant</th><th className="r">Solde</th></tr></thead>
             <tbody>{rows.map((x, i) => (
-              <tr key={i} style={x.piece ? { cursor: 'pointer' } : null} onClick={() => x.piece && onOpen(x.piece)}>
+              <tr key={i} style={x.piece || x.order ? { cursor: 'pointer' } : null} onClick={() => (x.piece ? onOpen(x.piece) : x.order ? onOrder(x.order) : null)}>
                 <td>{new Date(x.date).toLocaleDateString('fr-FR')}</td>
-                <td><b>{x.kind === 'vente' ? 'Vente' : x.kind === 'ajust' ? 'Ajustement gains' : 'Frais'}</b><div className="m" style={{ color: 'var(--muted)', fontSize: 12.5 }}>{x.label}{x.kind === 'vente' && x.margin != null ? ` · marge ${eur(x.margin)}` : ''}</div></td>
-                <td className="m" style={{ color: 'var(--muted)' }}>{x.investor_id ? byId[x.investor_id]?.full_name || '—' : 'Perso (100 %)'}</td>
+                <td><b>{x.kind === 'vente' ? 'Vente' : x.kind === 'client' ? 'Vente client' : x.kind === 'ajust' ? 'Ajustement gains' : 'Frais'}</b><div className="m" style={{ color: 'var(--muted)', fontSize: 12.5 }}>{x.label}{x.kind === 'vente' && x.margin != null ? ` · marge ${eur(x.margin)}` : ''}</div></td>
+                <td className="m" style={{ color: 'var(--muted)' }}>{x.kind === 'client' ? 'Client · ' + (byId[x.client_id]?.full_name || '—') : x.investor_id ? byId[x.investor_id]?.full_name || '—' : 'Perso (100 %)'}</td>
                 <td className={'r ' + (x.amount >= 0 ? 'pos' : 'neg')}><b>{eur(x.amount, true)}</b></td>
                 <td className="r">{eur(x.balance)}</td>
               </tr>
@@ -846,5 +859,175 @@ function Releve({ s, pieces, mvts, exps, share }) {
         <p className="m" style={{ color: 'var(--muted)', fontSize: 12, marginTop: 8 }}>Une pièce vendue lui rend sa mise + sa part : elle n'est plus comptée dans « en cours ». Les frais rattachés à une pièce sont déjà retirés de la marge de cette pièce.</p>
       </>}
     </div>
+  );
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Clients : commandes sourcées pour un acheteur                       */
+/* ------------------------------------------------------------------ */
+const ORD_TONE = { demande: '', sourcing: 'warn', trouvee: 'warn', achetee: 'ok', expediee: 'ok', livree: 'ok', annulee: 'late' };
+
+function Clients({ orders, clients, byId, onOrder, onClient }) {
+  const [f, setF] = useState('open');
+  const open = orders.filter(ORDER_OPEN);
+  const done = orders.filter((o) => o.status === 'livree');
+  const sum = (arr, k) => arr.reduce((a, o) => a + orderNumbers(o)[k], 0);
+  const shown = orders.filter((o) => (f === 'open' ? ORDER_OPEN(o) : f === 'all' ? true : o.status === f));
+  return (
+    <>
+      <div className="stats">
+        <Stat dark k="Commandes en cours" v={String(open.length)} h={`${clients.length} client${clients.length > 1 ? 's' : ''}`} />
+        <Stat k="Reste à encaisser" v={eur(sum(open, 'reste'))} h={`acomptes reçus : ${eur(sum(open, 'deposit'))}`} />
+        <Stat k="Marge prévue" v={eur(sum(open, 'marge'), true)} h="sur les commandes en cours" />
+        <Stat k="Marge réalisée" v={eur(sum(done, 'marge'), true)} h={`${done.length} livrée${done.length > 1 ? 's' : ''} · dans Mes comptes`} />
+      </div>
+
+      {clients.length > 0 && (
+        <div className="chips" style={{ marginBottom: 16 }}>
+          {clients.map((c) => { const nb = orders.filter((o) => o.client_id === c.id && ORDER_OPEN(o)).length; return (
+            <button key={c.id} className="btn ghost sm" onClick={() => onClient(c)}>{c.full_name || c.email}{nb ? ` · ${nb}` : ''}</button>
+          ); })}
+        </div>
+      )}
+
+      <div className="filters">
+        <select value={f} onChange={(e) => setF(e.target.value)}>
+          <option value="open">En cours</option>
+          <option value="all">Toutes</option>
+          {Object.entries(ORDER_STATUS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        </select>
+      </div>
+
+      {clients.length === 0 ? <div className="empty">Aucun client. Crée d'abord un compte client (« + Client ») : il pourra suivre sa commande en se connectant.</div>
+        : shown.length === 0 ? <div className="empty">Aucune commande ici.</div> : (
+        <div className="grid">{shown.map((o) => {
+          const nb = orderNumbers(o);
+          return (
+            <div key={o.id} className="card" onClick={() => onOrder(o)}>
+              <div className="ph">
+                <span style={{ position: 'absolute', top: 12, left: 12 }}><span className={'badge ' + (ORD_TONE[o.status] || '')}>{ORDER_STATUS[o.status]}</span></span>
+                {o.photos?.[0] ? <img src={o.photos[0]} alt="" /> : <span className="m">Photo à venir</span>}
+              </div>
+              <div className="bd">
+                <div className="t">{o.brand ? o.brand + ' — ' : ''}{o.title}</div>
+                <div className="m">{['Pour ' + (byId[o.client_id]?.full_name || 'client'), o.size && 'Taille ' + o.size, o.eta && ORDER_OPEN(o) && 'prévue le ' + new Date(o.eta).toLocaleDateString('fr-FR')].filter(Boolean).join(' · ')}</div>
+                <div className="bar" style={{ marginTop: 10 }}><i style={{ width: Math.min(100, Number(o.progress || 0)) + '%' }} /></div>
+                <div className="row" style={{ marginTop: 12 }}>
+                  <div><div className="m">Prix client</div><div style={{ fontWeight: 700 }}>{eur(nb.price)}</div></div>
+                  <div><div className="m">Reste dû</div><div style={{ fontWeight: 700 }}>{eur(nb.reste)}</div></div>
+                  <div style={{ textAlign: 'right' }}><div className="m">Ma marge</div><div className={'big ' + (nb.marge >= 0 ? 'pos' : 'neg')}>{nb.hasCost ? eur(nb.marge, true) : '—'}</div></div>
+                </div>
+              </div>
+            </div>
+          );
+        })}</div>
+      )}
+    </>
+  );
+}
+
+function OrderForm({ initial, clients, onClose, onSaved }) {
+  const [o, setO] = useState({ title: '', brand: '', size: '', reference: '', photos: [], status: 'demande', price: '', deposit: '', eta: '', progress: 0, client_note: '', purchase_price: '', fees: '', internal_note: '', ...initial });
+  const { busy, err, run } = useBusy();
+  const set = (k) => (e) => setO({ ...o, [k]: e.target.value });
+  const nb = orderNumbers(o);
+  const step = ORDER_STEPS.indexOf(o.status);
+  const setStatus = (st) => {
+    const i = ORDER_STEPS.indexOf(st);
+    const auto = i >= 0 ? Math.round((i / (ORDER_STEPS.length - 1)) * 100) : o.progress;
+    setO({ ...o, status: st, progress: Math.max(Number(o.progress || 0), auto), delivered_at: st === 'livree' ? (o.delivered_at || today()) : o.delivered_at });
+  };
+  return (
+    <Modal onClose={onClose}>
+      <h2>{initial.id ? 'Commande client' : 'Nouvelle commande client'}</h2>
+      <form onSubmit={(e) => { e.preventDefault(); run(async () => {
+        if (!o.client_id) throw new Error('Choisis le client.');
+        if (!o.title) throw new Error('Mets au moins le nom de la pièce.');
+        const row = { ...o, price: o.price === '' ? null : Number(o.price), deposit: o.deposit === '' ? 0 : Number(o.deposit), progress: Number(o.progress || 0),
+          purchase_price: o.purchase_price === '' || o.purchase_price == null ? null : Number(o.purchase_price), fees: o.fees === '' || o.fees == null ? null : Number(o.fees) };
+        await api.saveOrder(row); onSaved();
+      }); }}>
+        <h4 style={{ margin: '4px 0 10px' }}>Ce que voit le client</h4>
+        <div className="fgrid">
+          <Field label="Client">
+            <select value={o.client_id || ''} onChange={set('client_id')}>
+              <option value="">Choisir…</option>
+              {clients.map((c) => <option key={c.id} value={c.id}>{c.full_name || c.email}</option>)}
+            </select>
+          </Field>
+          <Field label="Statut">
+            <select value={o.status} onChange={(e) => setStatus(e.target.value)}>
+              {Object.entries(ORDER_STATUS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </select>
+          </Field>
+          <Field label="Marque"><input className="in-f" value={o.brand || ''} onChange={set('brand')} placeholder="ex. Louis Vuitton" /></Field>
+          <Field label="Pièce"><input className="in-f" value={o.title} onChange={set('title')} placeholder="ex. Keepall 50" /></Field>
+          <Field label="Taille / coloris"><input className="in-f" value={o.size || ''} onChange={set('size')} /></Field>
+          <Field label="Référence"><input className="in-f" value={o.reference || ''} onChange={set('reference')} /></Field>
+          <Field label="Prix pour le client (€)"><input className="in-f" type="number" step="0.01" min="0" value={o.price ?? ''} onChange={set('price')} /></Field>
+          <Field label="Acompte reçu (€)"><input className="in-f" type="number" step="0.01" min="0" value={o.deposit ?? ''} onChange={set('deposit')} /></Field>
+          <Field label="Date prévue (sourcée / livrée)"><input className="in-f" type="date" value={o.eta || ''} onChange={set('eta')} /></Field>
+          <Field label={`Avancement : ${Number(o.progress || 0)} %`}><input type="range" min="0" max="100" step="5" value={o.progress || 0} onChange={set('progress')} /></Field>
+          <Field full label="Où j'en suis (message pour le client)"><textarea rows={2} value={o.client_note || ''} onChange={set('client_note')} placeholder="ex. J'ai trouvé la pièce en boutique, je la récupère jeudi." /></Field>
+          <Field full label="Photos">
+            <input type="file" accept="image/*" multiple onChange={(e) => { const files = [...e.target.files]; run(async () => { const urls = []; for (const f of files) urls.push(await api.upload(f)); setO((y) => ({ ...y, photos: [...(y.photos || []), ...urls] })); }); e.target.value = ''; }} />
+            {o.photos?.length > 0 && <div className="gal" style={{ marginTop: 10 }}>{o.photos.map((u, i) => <a key={i} onClick={() => setO({ ...o, photos: o.photos.filter((_, j) => j !== i) })} title="Retirer"><img src={u} alt="" /></a>)}</div>}
+          </Field>
+        </div>
+
+        <h4 style={{ margin: '18px 0 10px' }}>Pour moi seulement <span className="m" style={{ fontWeight: 500, color: 'var(--muted)' }}>· le client ne le voit jamais</span></h4>
+        <div className="fgrid">
+          <Field label="Prix d'achat (€)"><input className="in-f" type="number" step="0.01" min="0" value={o.purchase_price ?? ''} onChange={set('purchase_price')} /></Field>
+          <Field label="Frais (train, livraison…) (€)"><input className="in-f" type="number" step="0.01" min="0" value={o.fees ?? ''} onChange={set('fees')} /></Field>
+          <Field full label="Note interne"><input className="in-f" value={o.internal_note || ''} onChange={set('internal_note')} placeholder="ex. boutique, contact, n° de commande…" /></Field>
+        </div>
+        <div className="kv" style={{ marginTop: 12 }}>
+          <div><div className="k">Reste à payer (client)</div><div className="v">{eur(nb.reste)}</div></div>
+          <div><div className="k">Coût total</div><div className="v">{eur(nb.cost)}</div></div>
+          <div><div className="k">Ma marge {o.status === 'livree' ? '(réalisée)' : '(prévue)'}</div><div className={'v ' + (nb.marge >= 0 ? 'pos' : 'neg')}>{eur(nb.marge, true)}</div></div>
+        </div>
+        <p className="m" style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 8 }}>Quand tu passes la commande en « Livrée », la marge entre dans Mes comptes à la date de livraison.</p>
+        {err && <div className="err">{err}</div>}
+        <div style={{ display: 'flex', gap: 10, marginTop: 18, flexWrap: 'wrap' }}>
+          <button className="btn" disabled={busy}>Enregistrer</button>
+          <button type="button" className="btn ghost" onClick={onClose}>Annuler</button>
+          {initial.id && <button type="button" className="btn danger" style={{ marginLeft: 'auto' }} onClick={() => run(async () => { if (confirm('Supprimer cette commande ?')) { await api.deleteOrder(initial.id); onSaved(); } })}>Supprimer</button>}
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function ClientEditor({ c, orders, onClose, onSaved }) {
+  const [f, setF] = useState({ full_name: c.full_name || '', email: c.email || '', password: '' });
+  const { busy, err, run } = useBusy();
+  const open = orders.filter(ORDER_OPEN);
+  const total = orders.filter((o) => o.status !== 'annulee').reduce((a, o) => a + orderNumbers(o).price, 0);
+  return (
+    <Modal onClose={onClose}>
+      <h2>{c.full_name || c.email}</h2>
+      <div className="kv">
+        <div><div className="k">Commandes</div><div className="v">{orders.length} · {open.length} en cours</div></div>
+        <div><div className="k">Total commandé</div><div className="v">{eur(total)}</div></div>
+        <div><div className="k">Reste à encaisser</div><div className="v">{eur(open.reduce((a, o) => a + orderNumbers(o).reste, 0))}</div></div>
+      </div>
+      <form style={{ marginTop: 16 }} onSubmit={(e) => { e.preventDefault(); run(async () => {
+        await api.updateInvestor({ id: c.id, full_name: f.full_name, ...(f.email !== c.email ? { email: f.email } : {}), ...(f.password ? { password: f.password } : {}) });
+        onSaved();
+      }); }}>
+        <div className="fgrid">
+          <Field label="Nom et prénom"><input className="in-f" value={f.full_name} onChange={(e) => setF({ ...f, full_name: e.target.value })} /></Field>
+          <Field label="Email"><input className="in-f" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
+          {!DEMO && <Field label="Nouveau mot de passe (optionnel)"><input className="in-f" minLength={8} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>}
+        </div>
+        {err && <div className="err">{err}</div>}
+        <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
+          <button className="btn" disabled={busy}>Enregistrer</button>
+          <button type="button" className="btn ghost" onClick={onClose}>Fermer</button>
+          <button type="button" className="btn danger" style={{ marginLeft: 'auto' }} onClick={() => run(async () => { if (confirm('Supprimer ce client et ses commandes ?')) { await api.deleteInvestor(c.id); onSaved(); } })}>Supprimer le client</button>
+        </div>
+      </form>
+    </Modal>
   );
 }

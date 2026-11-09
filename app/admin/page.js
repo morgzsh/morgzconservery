@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, DEMO } from '@/lib/data';
-import { STATUS, EXPENSE_TYPES, EXPENSE_STATUS, eur, investorSummary, pieceNumbers, withExpenses, morgzSummary, partnerPortion, hasTwo, isPartnerOf, pieceFor, morgzNumbers, ORDER_STATUS, ORDER_STEPS, ORDER_OPEN, orderNumbers } from '@/lib/calc';
+import { STATUS, EXPENSE_TYPES, EXPENSE_STATUS, eur, investorSummary, pieceNumbers, withExpenses, morgzSummary, partnerPortion, hasTwo, isPartnerOf, pieceFor, morgzNumbers, ORDER_STATUS, ORDER_STEPS, ORDER_OPEN, orderNumbers, payout, splitPayout } from '@/lib/calc';
 import AccountChart from '@/components/AccountChart';
 import { TopBar, Stat, PieceCard, PieceDetail, Modal, Footer, Badge, ExpenseList, ExpenseRule, useBusy } from '@/components/ui';
 
@@ -23,6 +23,8 @@ export default function Admin() {
   const [edit, setEdit] = useState(null);
   const [newInv, setNewInv] = useState(false);
   const [orders, setOrders] = useState([]);
+  const [wds, setWds] = useState([]);
+  const [pay, setPay] = useState(null);
   const [editOrd, setEditOrd] = useState(null);
   const [newClient, setNewClient] = useState(false);
   const [editClient, setEditClient] = useState(null);
@@ -42,6 +44,7 @@ export default function Admin() {
     setMvts(await api.movements());
     setProps(await api.proposals());
     setOrders(await api.orders());
+    setWds(await api.withdrawals());
   }, []);
 
   useEffect(() => {
@@ -107,7 +110,7 @@ export default function Admin() {
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <div className="tabs">
-            {[['pieces', 'Pièces'], ['props', 'Propositions' + (props.filter((x) => x.status === 'accepted').length ? ' · ' + props.filter((x) => x.status === 'accepted').length : '')], ['clients', 'Clients' + (orders.filter(ORDER_OPEN).length ? ' · ' + orders.filter(ORDER_OPEN).length : '')], ['investors', 'Partenaires'], ['mvts', 'Mouvements'], ['frais', 'Frais'], ['compte', 'Mes comptes']].map(([k, l]) => (
+            {[['pieces', 'Pièces'], ['props', 'Propositions' + (props.filter((x) => x.status === 'accepted').length ? ' · ' + props.filter((x) => x.status === 'accepted').length : '')], ['clients', 'Clients' + (orders.filter(ORDER_OPEN).length ? ' · ' + orders.filter(ORDER_OPEN).length : '')], ['investors', 'Partenaires'], ['soldes', 'Soldes & retraits' + (wds.filter((w) => w.status === 'pending').length ? ' · ' + wds.filter((w) => w.status === 'pending').length : '')], ['mvts', 'Mouvements'], ['frais', 'Frais'], ['compte', 'Mes comptes']].map(([k, l]) => (
               <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
             ))}
           </div>
@@ -115,6 +118,7 @@ export default function Admin() {
             {tab === 'pieces' && <button className="btn" onClick={() => setEdit({})}>+ Nouvelle pièce</button>}
             {tab === 'props' && <button className="btn" onClick={() => setEditProp({})}>+ Proposer une pièce</button>}
             {tab === 'clients' && <><button className="btn ghost" onClick={() => setNewClient(true)}>+ Client</button><button className="btn" onClick={() => setEditOrd({ client_id: clients[0]?.id || '', status: 'demande', progress: 0 })}>+ Commande client</button></>}
+            {tab === 'soldes' && <button className="btn" onClick={() => setPay({ investor_id: investors[0]?.id || '' })}>+ Enregistrer un retrait</button>}
             {tab === 'investors' && <button className="btn" onClick={() => setNewInv(true)}>+ Nouveau partenaire</button>}
             {tab === 'frais' && <button className="btn" onClick={() => setEditEx({})}>+ Nouveau frais</button>}
             {tab === 'compte' && <button className="btn" onClick={() => setEditEx({ investor_id: '' })}>+ Frais perso</button>}
@@ -155,6 +159,12 @@ export default function Admin() {
           onCreate={(x) => setEdit({ title: x.title, brand: x.brand || '', size: x.size || '', photos: x.photos || [], purchase_price: x.purchase_price, target_price: x.target_price, investor_id: x.investor_id, investor_contribution: x.contribution ?? '', notes: x.note || '', status: 'achetee', _fromProp: x.id })} />}
 
         {tab === 'clients' && <Clients orders={orders} clients={clients} byId={byId} onOrder={(o) => setEditOrd(o)} onClient={(c) => setEditClient(c)} />}
+
+        {tab === 'soldes' && <Soldes investors={investors} wds={wds} byId={byId}
+          sumOf={(id) => investorSummary(piecesOf(id), mvts.filter((m) => m.investor_id === id), byId[id]?.share_pct ?? 60, exOf(id))}
+          paid={mvts.filter((m) => m.investor_id && (m.type === 'retrait' || m.type === 'versement_gains'))}
+          onPay={(x) => setPay(x)}
+          onRefuse={async (w) => { if (confirm('Refuser cette demande de retrait ?')) { await api.updateWithdrawal(w.id, { status: 'refused' }); load(); } }} />}
 
         {tab === 'investors' && (investors.length === 0 ? <div className="empty">Aucun partenaire.</div> : (
           <div className="scroll"><table className="tbl">
@@ -214,6 +224,7 @@ export default function Admin() {
       )}
       {edit && <PieceForm initial={edit} investors={investors} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(); }} />}
       {editProp && <ProposalForm initial={editProp} investors={investors} onClose={() => setEditProp(null)} onSaved={() => { setEditProp(null); load(); }} />}
+      {pay && <PayoutForm initial={pay} investors={investors} sumOf={(id) => investorSummary(piecesOf(id), mvts.filter((m) => m.investor_id === id), byId[id]?.share_pct ?? 60, exOf(id))} onClose={() => setPay(null)} onSaved={() => { setPay(null); load(); }} />}
       {editOrd && <OrderForm initial={editOrd} clients={clients} onClose={() => setEditOrd(null)} onSaved={() => { setEditOrd(null); load(); }} />}
       {newClient && <InvestorForm client onClose={() => setNewClient(false)} onSaved={() => { setNewClient(false); load(); }} />}
       {editClient && <ClientEditor c={editClient} orders={orders.filter((o) => o.client_id === editClient.id)} onClose={() => setEditClient(null)} onSaved={() => { setEditClient(null); load(); }} />}
@@ -1026,6 +1037,139 @@ function ClientEditor({ c, orders, onClose, onSaved }) {
           <button className="btn" disabled={busy}>Enregistrer</button>
           <button type="button" className="btn ghost" onClick={onClose}>Fermer</button>
           <button type="button" className="btn danger" style={{ marginLeft: 'auto' }} onClick={() => run(async () => { if (confirm('Supprimer ce client et ses commandes ?')) { await api.deleteInvestor(c.id); onSaved(); } })}>Supprimer le client</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Soldes & retraits : ce que je dois, ce que j'ai rendu               */
+/* ------------------------------------------------------------------ */
+function Soldes({ investors, wds, byId, sumOf, paid, onPay, onRefuse }) {
+  const rows = investors.map((i) => ({ i, s: sumOf(i.id) })).map((x) => ({ ...x, p: payout(x.s) }));
+  const tot = (k) => rows.reduce((a, x) => a + x.p[k], 0);
+  const pending = wds.filter((w) => w.status === 'pending');
+  const d = (x) => new Date(x).toLocaleDateString('fr-FR');
+  return (
+    <>
+      <div className="stats">
+        <Stat dark k="Je dois aux partenaires" v={eur(tot('du'))} h="Capital + gains pas encore versés" />
+        <Stat k="Retirable tout de suite" v={eur(tot('retirable'))} h="Hors argent bloqué dans les pièces" />
+        <Stat k="Bloqué dans les pièces" v={eur(tot('bloque'))} h="Revient à la vente" />
+        <Stat k="Déjà remboursé" v={eur(tot('rembourse'))} h="Retraits de capital + gains versés" />
+      </div>
+
+      {pending.length > 0 && (
+        <div className="section">
+          <h2>Demandes de retrait</h2>
+          <div style={{ display: 'grid', gap: 12 }}>{pending.map((w) => {
+            const x = rows.find((r) => r.i.id === w.investor_id);
+            const over = x && Number(w.amount) > x.p.retirable;
+            return (
+              <div key={w.id} className="msgcard" style={{ background: '#fff', color: 'var(--ink)', border: '1px solid var(--line)', marginBottom: 0 }}>
+                <div className="row" style={{ alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+                  <div>
+                    <b>{byId[w.investor_id]?.full_name || 'Partenaire'}</b> demande <b>{eur(w.amount)}</b>
+                    <div className="m" style={{ color: 'var(--muted)', fontSize: 13 }}>Le {d(w.created_at)}{w.note ? ` · « ${w.note} »` : ''}</div>
+                    {x && <div className="m" style={{ fontSize: 13, marginTop: 4, color: over ? 'var(--warn)' : 'var(--muted)' }}>Retirable tout de suite : {eur(x.p.retirable)}{over ? ` · ${eur(Number(w.amount) - x.p.retirable)} sont encore dans des pièces en cours` : ''}</div>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="btn sm" onClick={() => onPay({ investor_id: w.investor_id, amount: w.amount, request_id: w.id, note: 'Retrait demandé le ' + d(w.created_at) })}>Payer</button>
+                    <button className="btn ghost sm" onClick={() => onRefuse(w)}>Refuser</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}</div>
+        </div>
+      )}
+
+      <div className="section">
+        <h2>Par partenaire</h2>
+        {rows.length === 0 ? <div className="empty">Aucun partenaire.</div> : (
+          <div className="scroll"><table className="tbl">
+            <thead><tr><th>Partenaire</th><th className="r">Apporté</th><th className="r">Gains réalisés</th><th className="r">Déjà rendu</th><th className="r">Bloqué</th><th className="r">Retirable</th><th className="r">Je lui dois</th><th></th></tr></thead>
+            <tbody>{rows.map(({ i, s, p }) => (
+              <tr key={i.id}>
+                <td><b>{i.full_name || i.email}</b></td>
+                <td className="r">{eur(s.apports)}</td>
+                <td className="r pos">{eur(s.gainsRealises, true)}</td>
+                <td className="r">{eur(p.rembourse)}</td>
+                <td className="r">{eur(p.bloque)}</td>
+                <td className="r">{eur(p.retirable)}</td>
+                <td className="r"><b>{eur(p.du)}</b></td>
+                <td className="r"><button className="btn ghost sm" onClick={() => onPay({ investor_id: i.id })}>Retrait</button></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </div>
+
+      <div className="section">
+        <h2>Remboursements effectués</h2>
+        {paid.length === 0 ? <div className="empty">Aucun remboursement pour le moment.</div> : (
+          <div className="scroll"><table className="tbl">
+            <thead><tr><th>Date</th><th>Partenaire</th><th>Type</th><th>Mention</th><th className="r">Montant</th></tr></thead>
+            <tbody>{paid.map((m) => (
+              <tr key={m.id}>
+                <td>{d(m.date)}</td>
+                <td>{byId[m.investor_id]?.full_name || '—'}</td>
+                <td>{m.type === 'retrait' ? 'Capital rendu' : 'Gains versés'}</td>
+                <td className="m" style={{ color: 'var(--muted)' }}>{m.note || '—'}</td>
+                <td className="r"><b>{eur(m.amount)}</b></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function PayoutForm({ initial, investors, sumOf, onClose, onSaved }) {
+  const [f, setF] = useState({ investor_id: '', amount: '', date: today(), note: '', ...initial });
+  const { busy, err, run } = useBusy();
+  const s = f.investor_id ? sumOf(f.investor_id) : null;
+  const p = s ? payout(s) : null;
+  const sp = s ? splitPayout(f.amount, s) : { gains: 0, capital: 0 };
+  return (
+    <Modal onClose={onClose}>
+      <h2>Enregistrer un retrait</h2>
+      <p className="m" style={{ color: 'var(--muted)', fontSize: 13, marginTop: -6 }}>Le montant est pris d'abord sur ses gains disponibles, puis sur son capital. Il le verra dans son historique.</p>
+      <form onSubmit={(e) => { e.preventDefault(); run(async () => {
+        const a = Number(f.amount);
+        if (!f.investor_id) throw new Error('Choisis le partenaire.');
+        if (!(a > 0)) throw new Error('Montant invalide.');
+        if (sp.gains > 0) await api.saveMovement({ investor_id: f.investor_id, type: 'versement_gains', amount: sp.gains, date: f.date, note: f.note || 'Retrait' });
+        if (sp.capital > 0) await api.saveMovement({ investor_id: f.investor_id, type: 'retrait', amount: sp.capital, date: f.date, note: f.note || 'Retrait' });
+        if (f.request_id) await api.updateWithdrawal(f.request_id, { status: 'paid' });
+        onSaved();
+      }); }}>
+        <div className="fgrid">
+          <Field label="Partenaire">
+            <select value={f.investor_id} onChange={(e) => setF({ ...f, investor_id: e.target.value })} disabled={!!f.request_id}>
+              <option value="">Choisir…</option>
+              {investors.map((i) => <option key={i.id} value={i.id}>{i.full_name || i.email}</option>)}
+            </select>
+          </Field>
+          <Field label="Montant versé (€)"><input className="in-f" type="number" step="0.01" min="0" required value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></Field>
+          <Field label="Date"><input className="in-f" type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></Field>
+          <Field label="Mention"><input className="in-f" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="ex. Virement du 9 nov." /></Field>
+        </div>
+        {p && (
+          <div className="kv" style={{ marginTop: 12 }}>
+            <div><div className="k">Je lui dois</div><div className="v">{eur(p.du)}</div></div>
+            <div><div className="k">Retirable tout de suite</div><div className="v">{eur(p.retirable)}</div><div className="m" style={{ fontSize: 12, color: 'var(--muted)' }}>{eur(p.bloque)} bloqués dans les pièces</div></div>
+            <div><div className="k">Ce retrait</div><div className="v">{eur(Number(f.amount || 0))}</div><div className="m" style={{ fontSize: 12, color: 'var(--muted)' }}>{eur(sp.gains)} de gains · {eur(sp.capital)} de capital</div></div>
+          </div>
+        )}
+        {p && Number(f.amount) > p.retirable && <p className="m" style={{ color: 'var(--warn)', fontSize: 13, marginTop: 8 }}>Attention : c'est plus que ce qui est libre ({eur(p.retirable)}). La différence est encore dans des pièces en cours, donc tu l'avances de ta poche.</p>}
+        {err && <div className="err">{err}</div>}
+        <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+          <button className="btn" disabled={busy}>Enregistrer le retrait</button>
+          <button type="button" className="btn ghost" onClick={onClose}>Annuler</button>
         </div>
       </form>
     </Modal>

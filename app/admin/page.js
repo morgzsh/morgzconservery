@@ -459,6 +459,7 @@ function PartnerEditor({ inv, pieces, mvts, exps = [], onClose, reload, onDelete
   const [saved, setSaved] = useState(false);
   const [mv, setMv] = useState(null);
   const [gainEdit, setGainEdit] = useState(null);
+  const [capEdit, setCapEdit] = useState(null);
   const [del, setDel] = useState(false);
   const [confirmName, setConfirmName] = useState('');
   const { busy, err, run } = useBusy();
@@ -475,7 +476,7 @@ function PartnerEditor({ inv, pieces, mvts, exps = [], onClose, reload, onDelete
       <div className="m" style={{ color: 'var(--muted)', marginTop: -8 }}>{inv.email}</div>
 
       <div className="kv">
-        <div><div className="k">Capital investi</div><div className="v">{eur(s.capital)}</div></div>
+        <div><div className="k">Capital investi</div><div className="v">{eur(s.capital)}</div><div className="m" style={{ fontSize: 12, color: 'var(--muted)' }}>apporté {eur(s.apports)}{s.retraits ? ' · retiré ' + eur(s.retraits) : ''}</div><button type="button" className="btn ghost sm" style={{ marginTop: 8 }} onClick={() => setCapEdit({ value: Math.round(s.apports * 100) / 100 })}>Modifier</button></div>
         <div><div className="k">Engagé en pièces</div><div className="v">{eur(s.engage)}</div></div>
         <div><div className="k">Disponible</div><div className="v">{eur(s.disponible)}</div></div>
         <div><div className="k">Gains réalisés{s.ajust ? ' (dont ajust. ' + eur(s.ajust, true) + ')' : ''}</div><div className="v pos">{eur(s.gainsRealises, true)}</div><button type="button" className="btn ghost sm" style={{ marginTop: 8 }} onClick={() => setGainEdit({ value: Math.round(s.gainsRealises * 100) / 100, note: '' })}>Modifier</button></div>
@@ -484,6 +485,35 @@ function PartnerEditor({ inv, pieces, mvts, exps = [], onClose, reload, onDelete
         <div><div className="k">Frais ({exps.length})</div><div className="v">{eur(s.fraisTotal)}</div></div>
         <div><div className="k">Sa part des frais</div><div className="v">{eur(s.fraisPart)}</div></div>
       </div>
+
+      {capEdit && (
+        <form className="msgcard" style={{ marginTop: 14 }} onSubmit={(e) => { e.preventDefault(); run(async () => {
+          const target = Number(capEdit.value);
+          if (!isFinite(target) || target < 0) throw new Error('Montant invalide.');
+          const diff = Math.round((target - s.apports) * 100) / 100;
+          if (diff === 0) { setCapEdit(null); return; }
+          const aps = mvts.filter((m) => m.type === 'apport').sort((a, b) => String(a.date).localeCompare(String(b.date)));
+          if (aps.length === 0) await api.saveMovement({ investor_id: inv.id, type: 'apport', amount: target, date: today(), note: 'Apport initial' });
+          else if (aps.length === 1) await api.updateMovement({ id: aps[0].id, amount: target });
+          else {
+            const last = aps[aps.length - 1]; const nv = Math.round((Number(last.amount) + diff) * 100) / 100;
+            if (nv <= 0) throw new Error('Il a plusieurs apports : corrige-les un par un dans la liste des mouvements ci-dessous.');
+            await api.updateMovement({ id: last.id, amount: nv });
+          }
+          setCapEdit(null); await reload();
+        }); }}>
+          <b>Modifier la somme investie</b>
+          <p className="m" style={{ color: 'var(--muted)', fontSize: 13, margin: '6px 0 12px' }}>Mets le total qu'il t'a réellement versé. Je corrige son apport (pas de nouvelle ligne dans son historique), et ses retraits restent déduits à part.</p>
+          <div className="fgrid">
+            <Field label="Total apporté (€)"><input className="in-f" type="number" step="0.01" min="0" required value={capEdit.value} onChange={(e) => setCapEdit({ value: e.target.value })} /></Field>
+            <div style={{ alignSelf: 'end' }} className="m">{capEdit.value !== '' && Number(capEdit.value) !== s.apports ? <>Avant : {eur(s.apports)} → après : <b>{eur(Number(capEdit.value))}</b> · capital {eur(Number(capEdit.value) - s.retraits)}</> : null}</div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+            <button className="btn sm" disabled={busy}>Enregistrer</button>
+            <button type="button" className="btn ghost sm" onClick={() => setCapEdit(null)}>Annuler</button>
+          </div>
+        </form>
+      )}
 
       {gainEdit && (
         <form className="msgcard" style={{ marginTop: 14 }} onSubmit={(e) => { e.preventDefault(); run(async () => {

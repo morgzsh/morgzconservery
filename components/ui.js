@@ -160,10 +160,17 @@ export function PieceDetail({ p, share, onClose, actions, mine, owner, nb: nbo, 
   );
 }
 
+/** Traduit les erreurs de base de données en message compréhensible. */
+function friendly(m) {
+  if (/movements_type_check/.test(m)) return "La base n'accepte pas encore les ajustements de gains : lance le petit code SQL « ajustements » dans Supabase (je te l'ai envoyé), puis réessaie.";
+  if (/does not exist|schema cache/.test(m)) return "Il manque une table ou une colonne dans la base : lance le dernier code SQL dans Supabase, puis réessaie. (" + m + ")";
+  return m;
+}
+
 export function useBusy() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const run = async (fn) => { setBusy(true); setErr(''); try { await fn(); } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); } };
+  const run = async (fn) => { setBusy(true); setErr(''); try { await fn(); } catch (e) { setErr(friendly(e.message || String(e))); } finally { setBusy(false); } };
   return { busy, err, run, setErr };
 }
 

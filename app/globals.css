@@ -190,3 +190,9 @@ textarea { height: 84px; padding: 10px 14px; resize: vertical; }
 .steps .st.done i, .steps .st.cur i { background: var(--ink); }
 .steps .st.cur span { color: var(--ink); font-weight: 700; }
 @media (max-width: 640px) { .ordcard { grid-template-columns: 1fr; } .ordcard .oimg { height: 220px; } .steps .st span { font-size: 10px; } }
+form.msgcard input, form.msgcard textarea, form.msgcard select { color: #1d1d1f; background: #fff; }
+form.msgcard label, form.msgcard .lbl { color: rgba(255,255,255,.7); }
+form.msgcard .btn:not(.ghost) { background: #fff; color: #1d1d1f; border-color: #fff; }
+form.msgcard .btn.ghost { background: transparent; color: #fff; border-color: rgba(255,255,255,.35); }
+form.msgcard .m, form.msgcard b { color: inherit; }
+form.msgcard .err { margin-top: 10px; background: #fdeeee; color: #b8382f; border-radius: 12px; padding: 10px 12px; }

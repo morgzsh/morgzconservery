@@ -508,8 +508,9 @@ function PartnerEditor({ inv, pieces, mvts, exps = [], onClose, reload, onDelete
             <Field label="Total apporté (€)"><input className="in-f" type="number" step="0.01" min="0" required value={capEdit.value} onChange={(e) => setCapEdit({ value: e.target.value })} /></Field>
             <div style={{ alignSelf: 'end' }} className="m">{capEdit.value !== '' && Number(capEdit.value) !== s.apports ? <>Avant : {eur(s.apports)} → après : <b>{eur(Number(capEdit.value))}</b> · capital {eur(Number(capEdit.value) - s.retraits)}</> : null}</div>
           </div>
+          {err && <div className="err">{err}</div>}
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-            <button className="btn sm" disabled={busy}>Enregistrer</button>
+            <button className="btn sm" disabled={busy}>{busy ? 'Enregistrement…' : 'Enregistrer'}</button>
             <button type="button" className="btn ghost sm" onClick={() => setCapEdit(null)}>Annuler</button>
           </div>
         </form>
@@ -531,8 +532,9 @@ function PartnerEditor({ inv, pieces, mvts, exps = [], onClose, reload, onDelete
             <Field label="Mention (visible par lui)"><input className="in-f" value={gainEdit.note} onChange={(e) => setGainEdit({ ...gainEdit, note: e.target.value })} placeholder="ex. Bonus vente Chanel" /></Field>
           </div>
           {gainEdit.value !== '' && Number(gainEdit.value) !== Math.round(s.gainsRealises * 100) / 100 && <div className="m" style={{ marginTop: 8, fontSize: 13 }}>Ajustement : <b>{eur(Number(gainEdit.value) - s.gainsRealises, true)}</b></div>}
+          {err && <div className="err">{err}</div>}
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-            <button className="btn sm" disabled={busy}>Enregistrer</button>
+            <button className="btn sm" disabled={busy}>{busy ? 'Enregistrement…' : 'Enregistrer'}</button>
             <button type="button" className="btn ghost sm" onClick={() => setGainEdit(null)}>Annuler</button>
           </div>
         </form>
